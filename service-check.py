@@ -153,7 +153,7 @@ MESSAGES_SENT: list = []
 
 
 def mqtt_connected(client, userdata, flags, rc):
-    client.subscribe("ubirch-{}/ubirch/devices/00000000-0000-0000-0000-000000000000/processed".format(UBIRCH_ENV),
+    client.subscribe("ubirch-{}/ubirch/devices/{}/processed".format(UBIRCH_ENV, str(uuid)),
                      qos=1)
     connected_event.set()
 
@@ -169,7 +169,7 @@ def mqtt_received(client, userdata, msg):
     else:
         logger.error(msg.topic + " " + str(msg.payload))
     if len(MESSAGES_SENT) == 0:
-        client.unsubscribe("ubirch-{}/ubirch/devices/00000000-0000-0000-0000-000000000000/processed".format(UBIRCH_ENV))
+        client.unsubscribe("ubirch-{}/ubirch/devices/{}/processed".format(UBIRCH_ENV, str(uuid)))
         finished_event.set()
 
 
