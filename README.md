@@ -1,13 +1,13 @@
 # running the service check
 
 
-## clone the project
+Clone the project:
 
 ```
 git clone git@github.com/ubirch/ubirch-service-check
 ```
 
-## change into project dir, create a venv and run the script
+Change into project dir, create a venv:
 
 ```
 cd ubirch-service-check
@@ -16,11 +16,17 @@ source ./venv3/bin/activate
 pip install -r requirements.txt
 ```
 
-## you may want to set these environment variables
+Set these environment variables:
 
 ```
+#export UBIRCH_CLIENT=<client>
 export UBIRCH_AUTH=<token>
 export UBIRCH_ENV=dev
 export UBIRCH_AUTH_MQTT="username:password"
+```
+
+Run the script:
+
+```
 python service-check.py
 ```
