@@ -35,6 +35,7 @@ from ubirch.ubirch_protocol import UBIRCH_PROTOCOL_TYPE_REG
 logging.basicConfig(format='%(asctime)s %(name)20.20s %(levelname)-8.8s %(message)s', level=logging.INFO)
 logger = logging.getLogger()
 
+UBIRCH_CLIENT = os.getenv("UBIRCH_CLIENT")
 UBIRCH_ENV = os.getenv("UBIRCH_ENV")
 UBIRCH_AUTH = os.getenv("UBIRCH_AUTH")
 UBIRCH_AUTH_MQTT = os.getenv("UBIRCH_AUTH_MQTT")
@@ -48,21 +49,23 @@ if UBIRCH_ENV == "dev":
     MQTT_SERVER = "mq.dev.ubirch.com"
 elif UBIRCH_ENV == "demo":
     MQTT_SERVER = "mq.demo.ubirch.com"
+elif UBIRCH_ENV == "prod":
+    MQTT_SERVER = "mq.prod.ubirch.com"
 else:
     MQTT_SERVER = "localhost"
 
-logger.debug("UBIRCH_ENV  = '{}'".format(UBIRCH_ENV))
-logger.debug("UBIRCH_AUTH = '{}'".format(UBIRCH_AUTH))
-logger.debug("MQTT_SERVER = '{}:{}'".format(MQTT_SERVER, MQTT_PORT))
-logger.debug("MQTT_USER   = '{}'".format(MQTT_USER))
-logger.debug("MQTT_PASS   = '{}'".format(MQTT_PASS))
+logger.debug("UBIRCH_CLIENT = '{}'".format(UBIRCH_CLIENT))
+logger.debug("UBIRCH_ENV    = '{}'".format(UBIRCH_ENV))
+logger.debug("UBIRCH_AUTH   = '{}'".format(UBIRCH_AUTH))
+logger.debug("MQTT_SERVER   = '{}:{}'".format(MQTT_SERVER, MQTT_PORT))
+logger.debug("MQTT_USER     = '{}'".format(MQTT_USER))
+logger.debug("MQTT_PASS     = '{}'".format(MQTT_PASS))
 
 
 class Proto(ubirch.Protocol):
     def __init__(self, key_store: ubirch.KeyStore) -> None:
         super().__init__()
         self.__ks = key_store
-        logger.info("ubirch-protocol: device id: {}".format(uuid))
 
     def _sign(self, uuid: UUID, message: bytes) -> bytes:
         return self.__ks.find_signing_key(uuid).sign(message)
@@ -79,7 +82,21 @@ try:
 except:
     pass
 
-api = ubirch.API(env=UBIRCH_ENV, auth=UBIRCH_AUTH)
+# configure client specific services if we have one instead of core ubirch services
+if UBIRCH_CLIENT is not None:
+    # create a sub-class of the ubirch API to use
+    class ClientAPI(ubirch.API):
+        def __init__(self, client: str, auth: str = None, env: str = None, debug: bool = False) -> None:
+            super().__init__(auth, env, debug)
+            self._services[AVATAR_SERVICE] = "https://ubirch.api.{}.{}.ubirch.com/api/avatarService/v1" \
+                .format(client, env)
+
+
+    # instantiate the sub class to include ubirch-client
+    api = ClientAPI(client=UBIRCH_CLIENT, env=UBIRCH_ENV, auth=UBIRCH_AUTH)
+else:
+    api = ubirch.API(env=UBIRCH_ENV, auth=UBIRCH_AUTH)
+
 proto = Proto(keystore)
 
 # do an initial deepCheck test
@@ -153,8 +170,11 @@ MESSAGES_SENT: list = []
 
 
 def mqtt_connected(client, userdata, flags, rc):
-    client.subscribe("ubirch-{}/ubirch/devices/{}/processed".format(UBIRCH_ENV, str(uuid)),
-                     qos=1)
+    if UBIRCH_CLIENT is not None:
+        client.subscribe("{}-{}/ubirch/devices/{}/processed".format(UBIRCH_CLIENT, UBIRCH_ENV, str(uuid)), qos=1)
+    else:
+        client.subscribe("ubirch-{}/ubirch/devices/{}/processed".format(UBIRCH_ENV, str(uuid)), qos=1)
+
     connected_event.set()
 
 
