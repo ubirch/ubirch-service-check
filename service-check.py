@@ -134,11 +134,11 @@ if api.is_identity_registered(uuid):
 # register key
 key_registration = proto.message_signed(uuid, UBIRCH_PROTOCOL_TYPE_REG, keystore.get_certificate(uuid))
 r = api.register_identity(key_registration)
-if r.status_code == 200:
+if r.status_code == requests.codes.ok:
     logger.info("{}.service.{}.register_identity: OK".format(UBIRCH_ENV, KEY_SERVICE))
 else:
     logger.error("{}.service.{}.register_identity: FAILED: {} {}"
-                 .format(UBIRCH_ENV, KEY_SERVICE, r.status_code, r.content))
+                 .format(UBIRCH_ENV, KEY_SERVICE, r.status_code, bytes.decode(r.content)))
 
 # check if the device exists and delete if that is the case
 if api.device_exists(uuid):
@@ -158,11 +158,12 @@ r = api.device_create({
     },
     "created": "{}Z".format(datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3])
 })
-if r.status_code == 200:
+if r.status_code == requests.codes.ok:
     logger.info("{}.service.{}.device_create: OK".format(UBIRCH_ENV, AVATAR_SERVICE))
     time.sleep(2)
 else:
-    logger.error("{}.service.{}.device_create: FAILED: {}".format(UBIRCH_ENV, AVATAR_SERVICE, r.status_code, r.content))
+    logger.error("{}.service.{}.device_create: FAILED: {} {}"
+                 .format(UBIRCH_ENV, AVATAR_SERVICE, r.status_code, bytes.decode(r.content)))
 
 connected_event = threading.Event()
 finished_event = threading.Event()
@@ -218,11 +219,11 @@ for n in range(1, 5):
 # send out prepared messages
 for n, msg in enumerate(MESSAGES_SENT.copy()):
     r = api.send(msg)
-    if r.status_code == 202:
+    if r.status_code == requests.codes.accepted:
         logger.info("{}.service.{}.message.{}.send: OK".format(UBIRCH_ENV, AVATAR_SERVICE, n))
     else:
         logger.info("{}.service.{}.message.{}.send: FAILED: {} {}"
-                    .format(UBIRCH_ENV, AVATAR_SERVICE, n, r.status_code, r.content))
+                    .format(UBIRCH_ENV, AVATAR_SERVICE, n, r.status_code, bytes.decode(r.content)))
 
 finished_event.wait(timeout=30)
 if len(MESSAGES_SENT) == 0:
@@ -243,7 +244,8 @@ r = api.deregister_identity(str.encode(json.dumps({
     "publicKey": bytes.decode(base64.b64encode(vk.to_bytes())),
     "signature": bytes.decode(base64.b64encode(sk.sign(vk.to_bytes())))
 })))
-if r.status_code == 200:
+if r.status_code == requests.codes.ok:
     logger.info("{}.service.{}.deregister_identity: OK".format(UBIRCH_ENV, KEY_SERVICE))
 else:
-    logger.error("{}.service.{}.deregister_identity: FAILED: {}".format(UBIRCH_ENV, KEY_SERVICE, r.content))
+    logger.error("{}.service.{}.deregister_identity: FAILED: {}"
+                 .format(UBIRCH_ENV, KEY_SERVICE, bytes.decode(r.content)))
