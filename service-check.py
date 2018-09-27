@@ -32,7 +32,7 @@ import ubirch
 from ubirch.ubirch_api import AVATAR_SERVICE, KEY_SERVICE, CHAIN_SERVICE, NOTARY_SERVICE
 from ubirch.ubirch_protocol import UBIRCH_PROTOCOL_TYPE_REG
 
-logging.basicConfig(format='%(asctime)s %(name)20.20s %(levelname)-8.8s %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s %(name)20.20s %(levelname)-8.8s %(message)s', level=logging.DEBUG)
 logger = logging.getLogger()
 
 ERRORS = 0
