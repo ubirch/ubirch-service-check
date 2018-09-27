@@ -85,7 +85,7 @@ except:
     pass
 
 # configure client specific services if we have one instead of core ubirch services
-if not UBIRCH_CLIENT:
+if UBIRCH_CLIENT is not None and UBIRCH_CLIENT.strip():
     # create a sub-class of the ubirch API to use
     class ClientAPI(ubirch.API):
         def __init__(self, client: str, auth: str = None, env: str = None, debug: bool = False) -> None:
