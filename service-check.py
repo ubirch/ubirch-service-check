@@ -35,6 +35,8 @@ from ubirch.ubirch_protocol import UBIRCH_PROTOCOL_TYPE_REG
 logging.basicConfig(format='%(asctime)s %(name)20.20s %(levelname)-8.8s %(message)s', level=logging.INFO)
 logger = logging.getLogger()
 
+ERRORS = 0
+
 UBIRCH_CLIENT = os.getenv("UBIRCH_CLIENT")
 UBIRCH_ENV = os.getenv("UBIRCH_ENV")
 UBIRCH_AUTH = os.getenv("UBIRCH_AUTH")
@@ -100,21 +102,25 @@ else:
 proto = Proto(keystore)
 
 # do an initial deepCheck test
-for service in [KEY_SERVICE, AVATAR_SERVICE, NOTARY_SERVICE, CHAIN_SERVICE]:
+services = [KEY_SERVICE, AVATAR_SERVICE] #, NOTARY_SERVICE, CHAIN_SERVICE]
+for service in services:
     try:
         r = requests.get(api.get_url(service) + "/deepCheck", timeout=1.0)
         try:
             response = r.json()
             if not response['status']:
+                ERRORS += 1
                 logger.error("{}.service.{}.deepCheck: FAILED: {} {}"
                              .format(UBIRCH_ENV, service, r.status_code, response['messages']))
             else:
                 logger.info("{}.service.{}.deepCheck: OK".format(UBIRCH_ENV, service))
         except JSONDecodeError as e:
+            ERRORS += 1
             logger.error("{}.service.{}.deepCheck: FAILED: {} {}"
                          .format(UBIRCH_ENV, service, r.status_code, bytes.decode(r.content).split('\n')[0]))
 
     except Exception as e:
+        ERRORS += 1
         logger.error("{}.service.{}.deepCheck: FAILED: {}".format(UBIRCH_ENV, service, e.args))
 
 if not keystore.exists_signing_key(uuid):
@@ -169,7 +175,6 @@ connected_event = threading.Event()
 finished_event = threading.Event()
 MESSAGES_SENT: list = []
 
-
 def mqtt_connected(client, userdata, flags, rc):
     if UBIRCH_CLIENT is not None:
         client.subscribe("{}-{}/ubirch/devices/{}/processed".format(UBIRCH_CLIENT, UBIRCH_ENV, str(uuid)), qos=1)
@@ -180,6 +185,7 @@ def mqtt_connected(client, userdata, flags, rc):
 
 
 def mqtt_received(client, userdata, msg):
+    global ERRORS
     payload = json.loads(bytes.decode(msg.payload))
     message = bytes.fromhex(payload['deviceDataRaw']['mpraw'])
     logger.debug("{}: {}".format(str(msg.topic), str(msg.payload)))
@@ -188,6 +194,7 @@ def mqtt_received(client, userdata, msg):
         logger.info("{}.service.{}.message.mqtt.{}.received: OK"
                     .format(UBIRCH_ENV, AVATAR_SERVICE, payload['deviceMessage']['v']))
     else:
+        ERRORS += 1
         logger.error(msg.topic + " " + str(msg.payload))
     if len(MESSAGES_SENT) == 0:
         client.unsubscribe("ubirch-{}/ubirch/devices/{}/processed".format(UBIRCH_ENV, str(uuid)))
@@ -222,6 +229,7 @@ for n, msg in enumerate(MESSAGES_SENT.copy()):
     if r.status_code == requests.codes.accepted:
         logger.info("{}.service.{}.message.{}.send: OK".format(UBIRCH_ENV, AVATAR_SERVICE, n))
     else:
+        ERRORS += 1
         logger.info("{}.service.{}.message.{}.send: FAILED: {} {}"
                     .format(UBIRCH_ENV, AVATAR_SERVICE, n, r.status_code, bytes.decode(r.content)))
 
@@ -229,6 +237,7 @@ finished_event.wait(timeout=30)
 if len(MESSAGES_SENT) == 0:
     logger.info("{}.service.{}.mqtt: OK".format(UBIRCH_ENV, AVATAR_SERVICE))
 else:
+    ERRORS += 1
     logger.info("{}.service.{}.mqtt: FAILED: {} messages missing"
                 .format(UBIRCH_ENV, AVATAR_SERVICE, len(MESSAGES_SENT)))
 client.disconnect()
@@ -237,6 +246,7 @@ client.disconnect()
 if api.device_delete(uuid):
     logger.info("{}.service.{}.device_delete: OK".format(UBIRCH_ENV, AVATAR_SERVICE))
 else:
+    ERRORS +=1
     logger.error("{}.service.{}.device_delete: FAILED".format(UBIRCH_ENV, AVATAR_SERVICE))
 
 # delete key
@@ -247,5 +257,10 @@ r = api.deregister_identity(str.encode(json.dumps({
 if r.status_code == requests.codes.ok:
     logger.info("{}.service.{}.deregister_identity: OK".format(UBIRCH_ENV, KEY_SERVICE))
 else:
+    ERRORS += 1
     logger.error("{}.service.{}.deregister_identity: FAILED: {}"
                  .format(UBIRCH_ENV, KEY_SERVICE, bytes.decode(r.content)))
+
+if ERRORS > 0:
+    logger.error("{} ERRORS".format(ERRORS))
+    exit(-1)
