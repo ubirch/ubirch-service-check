@@ -149,7 +149,7 @@ else:
 # check if the device exists and delete if that is the case
 if api.device_exists(uuid):
     api.device_delete(uuid)
-    time.sleep(2)
+    time.sleep(5)
 
 # create a new device on the backend
 r = api.device_create({
@@ -166,7 +166,7 @@ r = api.device_create({
 })
 if r.status_code == requests.codes.ok:
     logger.info("{}.service.{}.device_create: OK".format(UBIRCH_ENV, AVATAR_SERVICE))
-    time.sleep(2)
+    time.sleep(5)
 else:
     logger.error("{}.service.{}.device_create: FAILED: {} {}"
                  .format(UBIRCH_ENV, AVATAR_SERVICE, r.status_code, bytes.decode(r.content)))
