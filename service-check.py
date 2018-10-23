@@ -17,6 +17,7 @@
 # limitations under the License.
 #
 import base64
+import binascii
 import json
 import logging
 import os
@@ -29,10 +30,10 @@ from uuid import UUID
 import paho.mqtt.client as mqtt
 import requests
 import ubirch
-from ubirch.ubirch_api import AVATAR_SERVICE, KEY_SERVICE, CHAIN_SERVICE, NOTARY_SERVICE
+from ubirch.ubirch_api import AVATAR_SERVICE, KEY_SERVICE
 from ubirch.ubirch_protocol import UBIRCH_PROTOCOL_TYPE_REG
 
-logging.basicConfig(format='%(asctime)s %(name)20.20s %(levelname)-8.8s %(message)s', level=logging.DEBUG)
+logging.basicConfig(format='%(asctime)s %(name)20.20s %(levelname)-8.8s %(message)s', level=logging.INFO)
 logger = logging.getLogger()
 
 ERRORS = 0
@@ -62,6 +63,18 @@ logger.debug("UBIRCH_AUTH   = '{}'".format(UBIRCH_AUTH))
 logger.debug("MQTT_SERVER   = '{}:{}'".format(MQTT_SERVER, MQTT_PORT))
 logger.debug("MQTT_USER     = '{}'".format(MQTT_USER))
 logger.debug("MQTT_PASS     = '{}'".format(MQTT_PASS))
+
+NAGIOS_OK = 0
+NAGIOS_WARNING = 1
+NAGIOS_ERROR = 2
+NAGIOS_UNKNOWN = 3
+
+
+def nagios(env, host, service, code, message="OK"):
+    if env is None: env = "ubirch"
+
+    logger.error("{} PROCESS_SERVICE_CHECK_RESULT;{};{};{};{}"
+                 .format(int(datetime.utcnow().timestamp()), env+"-"+host, service, code, message))
 
 
 class Proto(ubirch.Protocol):
@@ -102,7 +115,7 @@ else:
 proto = Proto(keystore)
 
 # do an initial deepCheck test
-services = [KEY_SERVICE, AVATAR_SERVICE] #, NOTARY_SERVICE, CHAIN_SERVICE]
+services = [KEY_SERVICE, AVATAR_SERVICE]  # , NOTARY_SERVICE, CHAIN_SERVICE]
 for service in services:
     try:
         r = requests.get(api.get_url(service) + "/deepCheck", timeout=1.0)
@@ -110,18 +123,23 @@ for service in services:
             response = r.json()
             if not response['status']:
                 ERRORS += 1
-                logger.error("{}.service.{}.deepCheck: FAILED: {} {}"
-                             .format(UBIRCH_ENV, service, r.status_code, response['messages']))
+                # logger.error("{}.service.{}.deepCheck: FAILED: {} {}"
+                #              .format(UBIRCH_ENV, service, r.status_code, response['messages']))
+                nagios(UBIRCH_CLIENT, UBIRCH_ENV, service, NAGIOS_ERROR, r.status_code + " " + response['messages'])
             else:
-                logger.info("{}.service.{}.deepCheck: OK".format(UBIRCH_ENV, service))
+                # logger.info("{}.service.{}.deepCheck: OK".format(UBIRCH_ENV, service))
+                nagios(UBIRCH_CLIENT, UBIRCH_ENV, service, NAGIOS_OK)
+
         except JSONDecodeError as e:
             ERRORS += 1
-            logger.error("{}.service.{}.deepCheck: FAILED: {} {}"
-                         .format(UBIRCH_ENV, service, r.status_code, bytes.decode(r.content).split('\n')[0]))
+            # logger.error("{}.service.{}.deepCheck: FAILED: {} {}"
+            #              .format(UBIRCH_ENV, service, r.status_code, bytes.decode(r.content).split('\n')[0]))
+            nagios(UBIRCH_CLIENT, UBIRCH_ENV, service, NAGIOS_ERROR, "{} {}".format(r.status_code, bytes.decode(r.content).split('\n')[0]))
 
     except Exception as e:
         ERRORS += 1
-        logger.error("{}.service.{}.deepCheck: FAILED: {}".format(UBIRCH_ENV, service, e.args))
+        # logger.error("{}.service.{}.deepCheck: FAILED: {}".format(UBIRCH_ENV, service, e.args))
+        nagios(UBIRCH_CLIENT, UBIRCH_ENV, service, NAGIOS_ERROR, " ".join(e.args))
 
 if not keystore.exists_signing_key(uuid):
     keystore.create_ed25519_keypair(uuid)
@@ -141,10 +159,12 @@ if api.is_identity_registered(uuid):
 key_registration = proto.message_signed(uuid, UBIRCH_PROTOCOL_TYPE_REG, keystore.get_certificate(uuid))
 r = api.register_identity(key_registration)
 if r.status_code == requests.codes.ok:
-    logger.info("{}.service.{}.register_identity: OK".format(UBIRCH_ENV, KEY_SERVICE))
+    # logger.info("{}.service.{}.register_identity: OK".format(UBIRCH_ENV, KEY_SERVICE))
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE+"/register", NAGIOS_OK)
 else:
-    logger.error("{}.service.{}.register_identity: FAILED: {} {}"
-                 .format(UBIRCH_ENV, KEY_SERVICE, r.status_code, bytes.decode(r.content)))
+    # logger.error("{}.service.{}.register_identity: FAILED: {} {}"
+    #              .format(UBIRCH_ENV, KEY_SERVICE, r.status_code, bytes.decode(r.content)))
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE+"/register", NAGIOS_ERROR, "{} {}".format(r.status_code, bytes.decode(r.content)))
 
 # check if the device exists and delete if that is the case
 if api.device_exists(uuid):
@@ -165,15 +185,18 @@ r = api.device_create({
     "created": "{}Z".format(datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3])
 })
 if r.status_code == requests.codes.ok:
-    logger.info("{}.service.{}.device_create: OK".format(UBIRCH_ENV, AVATAR_SERVICE))
-    time.sleep(5)
+    # logger.info("{}.service.{}.device_create: OK".format(UBIRCH_ENV, AVATAR_SERVICE))
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, AVATAR_SERVICE+"/device_create", NAGIOS_OK)
+    time.sleep(2)
 else:
-    logger.error("{}.service.{}.device_create: FAILED: {} {}"
-                 .format(UBIRCH_ENV, AVATAR_SERVICE, r.status_code, bytes.decode(r.content)))
+    # logger.error("{}.service.{}.device_create: FAILED: {} {}"
+    #              .format(UBIRCH_ENV, AVATAR_SERVICE, r.status_code, bytes.decode(r.content)))
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, AVATAR_SERVICE+"/device_create", NAGIOS_ERROR, "{} {}".format(r.status_code, bytes.decode(r.content)))
 
 connected_event = threading.Event()
 finished_event = threading.Event()
 MESSAGES_SENT: list = []
+
 
 def mqtt_connected(client, userdata, flags, rc):
     if UBIRCH_CLIENT is not None:
@@ -215,17 +238,20 @@ client.loop_start()
 
 # wait until mqtt is connected and subscribed
 connected_event.wait(timeout=30)
-# send a signed message
-msg = proto.message_signed(uuid, 0x53, {'ts': int(datetime.utcnow().timestamp()), 'v': 0})
-MESSAGES_SENT.append(msg)
-# then send chained messages
-for n in range(1, 5):
+# send signed messages
+for n in range(1, 6):
+    msg = proto.message_signed(uuid, 0x53, {'ts': int(datetime.utcnow().timestamp()), 'v': n})
+    MESSAGES_SENT.append(msg)
+# send chained messages
+for n in range(6, 11):
     msg = proto.message_chained(uuid, 0x53, {'ts': int(datetime.utcnow().timestamp()), 'v': n})
     MESSAGES_SENT.append(msg)
 
+ERROR_RESULTS = []
 # send out prepared messages
 for n, msg in enumerate(MESSAGES_SENT.copy()):
     r = api.send(msg)
+    logger.debug(binascii.hexlify(msg))
     if r.status_code == requests.codes.accepted:
         logger.info("{}.service.{}.message.{}.send: OK".format(UBIRCH_ENV, AVATAR_SERVICE, n))
     else:
@@ -244,10 +270,12 @@ client.disconnect()
 
 # delete the device
 if api.device_delete(uuid):
-    logger.info("{}.service.{}.device_delete: OK".format(UBIRCH_ENV, AVATAR_SERVICE))
+    # logger.info("{}.service.{}.device_delete: OK".format(UBIRCH_ENV, AVATAR_SERVICE))
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, AVATAR_SERVICE+"/device_delete", NAGIOS_OK)
 else:
-    ERRORS +=1
-    logger.error("{}.service.{}.device_delete: FAILED".format(UBIRCH_ENV, AVATAR_SERVICE))
+    ERRORS += 1
+    # logger.error("{}.service.{}.device_delete: FAILED".format(UBIRCH_ENV, AVATAR_SERVICE))
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, AVATAR_SERVICE+"/device_delete", NAGIOS_ERROR, "failed")
 
 # delete key
 r = api.deregister_identity(str.encode(json.dumps({
@@ -255,12 +283,19 @@ r = api.deregister_identity(str.encode(json.dumps({
     "signature": bytes.decode(base64.b64encode(sk.sign(vk.to_bytes())))
 })))
 if r.status_code == requests.codes.ok:
-    logger.info("{}.service.{}.deregister_identity: OK".format(UBIRCH_ENV, KEY_SERVICE))
+    # logger.info("{}.service.{}.deregister_identity: OK".format(UBIRCH_ENV, KEY_SERVICE))
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE+"/deregister", NAGIOS_OK)
 else:
     ERRORS += 1
-    logger.error("{}.service.{}.deregister_identity: FAILED: {}"
-                 .format(UBIRCH_ENV, KEY_SERVICE, bytes.decode(r.content)))
+    # logger.error("{}.service.{}.deregister_identity: FAILED: {}"
+    #              .format(UBIRCH_ENV, KEY_SERVICE, bytes.decode(r.content)))
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE+"/deregister", NAGIOS_ERROR, "{} {}".format(r.status_code, bytes.decode(r.content)))
 
 if ERRORS > 0:
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, "ubirch", NAGIOS_ERROR, "{} messages missing, total {} errors".format(len(MESSAGES_SENT), ERRORS))
     logger.error("{} ERRORS".format(ERRORS))
     exit(-1)
+else:
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, "ubirch", NAGIOS_OK)
+    logger.info("All Services: OK")
+    exit(0)
