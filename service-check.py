@@ -33,12 +33,15 @@ import ubirch
 from ubirch.ubirch_api import AVATAR_SERVICE, KEY_SERVICE
 from ubirch.ubirch_protocol import UBIRCH_PROTOCOL_TYPE_REG
 
-logging.basicConfig(format='%(asctime)s %(name)20.20s %(levelname)-8.8s %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s %(name)20.20s %(levelname)-8.8s %(message)s', level=logging.DEBUG)
 logger = logging.getLogger()
 
 ERRORS = 0
 
 UBIRCH_CLIENT = os.getenv("UBIRCH_CLIENT")
+if UBIRCH_CLIENT is not None and not UBIRCH_CLIENT.strip():
+    UBIRCH_CLIENT=None
+
 UBIRCH_ENV = os.getenv("UBIRCH_ENV")
 UBIRCH_AUTH = os.getenv("UBIRCH_AUTH")
 UBIRCH_AUTH_MQTT = os.getenv("UBIRCH_AUTH_MQTT")
@@ -72,10 +75,15 @@ NAGIOS_UNKNOWN = 3
 
 def nagios(env, host, service, code, message="OK"):
     if env is None: env = "ubirch"
-
-    logger.error("{} PROCESS_SERVICE_CHECK_RESULT;{};{};{};{}"
-                 .format(int(datetime.utcnow().timestamp()), env+"-"+host, service, code, message))
-
+    if code == NAGIOS_OK:
+        logger.info("{} PROCESS_SERVICE_CHECK_RESULT;{};{};{};{}"
+                     .format(int(datetime.utcnow().timestamp()), env+"-"+host, service, code, message))
+    elif code == NAGIOS_WARNING:
+        logger.warning("{} PROCESS_SERVICE_CHECK_RESULT;{};{};{};{}"
+                       .format(int(datetime.utcnow().timestamp()), env+"-"+host, service, code, message))
+    else:
+        logger.error("{} PROCESS_SERVICE_CHECK_RESULT;{};{};{};{}"
+               .format(int(datetime.utcnow().timestamp()), env+"-"+host, service, code, message))
 
 class Proto(ubirch.Protocol):
     def __init__(self, key_store: ubirch.KeyStore) -> None:
@@ -204,8 +212,10 @@ def mqtt_connected(client, userdata, flags, rc):
     else:
         client.subscribe("ubirch-{}/ubirch/devices/{}/processed".format(UBIRCH_ENV, str(uuid)), qos=1)
 
-    connected_event.set()
 
+def mqtt_subscribed(client, userdata, mid, granted_qos):
+    logger.debug("SUBSCRIBED")
+    connected_event.set()
 
 def mqtt_received(client, userdata, msg):
     global ERRORS
@@ -224,20 +234,24 @@ def mqtt_received(client, userdata, msg):
         finished_event.set()
 
 
-client = mqtt.Client()
+client = mqtt.Client(client_id=uuid.hex)
 if MQTT_USER is not None and MQTT_PASS is not None:
     client.username_pw_set(MQTT_USER, MQTT_PASS)
 if logger.level == logging.DEBUG:
     client.enable_logger(logger)
 
 client.on_connect = mqtt_connected
+client.on_subscribe = mqtt_subscribed
 client.on_message = mqtt_received
 logger.debug("mqtt: connect({}, {})".format(MQTT_SERVER, MQTT_PORT))
 client.connect(MQTT_SERVER, MQTT_PORT, 30)
 client.loop_start()
 
 # wait until mqtt is connected and subscribed
-connected_event.wait(timeout=30)
+if not connected_event.wait(timeout=30):
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, "mqtt", NAGIOS_OK, "could not subscribe")
+    exit(-1)
+
 # send signed messages
 for n in range(1, 6):
     msg = proto.message_signed(uuid, 0x53, {'ts': int(datetime.utcnow().timestamp()), 'v': n})
