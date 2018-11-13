@@ -79,6 +79,8 @@ NAGIOS_UNKNOWN = 3
 
 
 def nagios(client, env, service, code, message="OK"):
+    global ERRORS
+
     if client is None: client = "ubirch"
 
     if client is not None:
@@ -95,7 +97,10 @@ def nagios(client, env, service, code, message="OK"):
         r = requests.post(ICINGA_URL + "?" + "service={}.ubirch.com!{}".format(env, service),
                           json=data, headers={"Accept": "application/json"}, auth=tuple(ICINGA_AUTH.split(":")))
         if r.status_code != 200:
-            logger.error("ICINGA CONNECTION FAILED: " + bytes.decode(r.content))
+            logger.error("ERROR: {}: {}".format(r.status_code, bytes.decode(r.content)))
+            ERRORS += 1
+        else:
+            logger.info("{}: {}".format(r.status_code, bytes.decode(r.content)))
 
     if code == NAGIOS_OK:
         logger.info("{} service={}.ubirch.com!{} {}"
@@ -297,6 +302,7 @@ for n, msg in enumerate(MESSAGES_SENT.copy()):
         logger.info("{}.service.{}.message.{}.send: OK".format(UBIRCH_ENV, AVATAR_SERVICE, n))
     else:
         ERRORS += 1
+        ERROR_RESULTS.append("message(#{}, {}): {}".format(n, r.status_code, bytes.decode(r.content)))
         logger.info("{}.service.{}.message.{}.send: FAILED: {} {}"
                     .format(UBIRCH_ENV, AVATAR_SERVICE, n, r.status_code, bytes.decode(r.content)))
 
@@ -335,7 +341,7 @@ else:
 
 if ERRORS > 0:
     nagios(UBIRCH_CLIENT, UBIRCH_ENV, "ubirch", NAGIOS_ERROR,
-           "{} messages missing, total {} errors".format(len(MESSAGES_SENT), ERRORS))
+           "{} messages missing, total {} errors\n{}".format(len(MESSAGES_SENT), ERRORS, "\n".join(ERROR_RESULTS)))
     logger.error("{} ERRORS".format(ERRORS))
     exit(-1)
 else:
