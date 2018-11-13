@@ -70,7 +70,7 @@ logger.debug("MQTT_SERVER   = '{}:{}'".format(MQTT_SERVER, MQTT_PORT))
 logger.debug("MQTT_USER     = '{}'".format(MQTT_USER))
 logger.debug("MQTT_PASS     = '{}'".format(MQTT_PASS))
 
-logger.debug("ICINGA_HOST   = '{}'".format(ICINGA_URL))
+logger.debug("ICINGA_URL    = '{}'".format(ICINGA_URL))
 logger.debug("ICINGA_AUTH   = '{}'".format(ICINGA_AUTH))
 NAGIOS_OK = 0
 NAGIOS_WARNING = 1
