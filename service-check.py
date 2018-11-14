@@ -81,7 +81,7 @@ NAGIOS_UNKNOWN = 3
 def nagios(client, env, service, code, message="OK"):
     global ERRORS
 
-    if client is None: client = "ubirch"
+    if not client: client = "ubirch"
 
     if client:
         env = client+"."+env
