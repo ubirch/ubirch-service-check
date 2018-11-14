@@ -39,7 +39,7 @@ logger = logging.getLogger()
 ERRORS = 0
 
 UBIRCH_CLIENT = os.getenv("UBIRCH_CLIENT")
-if UBIRCH_CLIENT is not None and not UBIRCH_CLIENT.strip():
+if UBIRCH_CLIENT and not UBIRCH_CLIENT.strip():
     UBIRCH_CLIENT = None
 
 UBIRCH_ENV = os.getenv("UBIRCH_ENV")
@@ -50,7 +50,7 @@ ICINGA_URL = os.getenv("ICINGA_URL")
 ICINGA_AUTH = os.getenv("ICINGA_AUTH")
 
 (MQTT_USER, MQTT_PASS) = (None, None)
-if UBIRCH_AUTH_MQTT is not None:
+if UBIRCH_AUTH_MQTT:
     (MQTT_USER, MQTT_PASS) = UBIRCH_AUTH_MQTT.split(":")
 
 MQTT_PORT = 1883
@@ -83,7 +83,7 @@ def nagios(client, env, service, code, message="OK"):
 
     if client is None: client = "ubirch"
 
-    if client is not None:
+    if client:
         env = client+"."+env
 
     data = {
@@ -93,7 +93,7 @@ def nagios(client, env, service, code, message="OK"):
         "ttl": 3600.0
     }
 
-    if ICINGA_URL is not None and ICINGA_AUTH is not None:
+    if ICINGA_URL and ICINGA_AUTH:
         r = requests.post(ICINGA_URL + "?" + "service={}.ubirch.com!{}".format(env, service),
                           json=data, headers={"Accept": "application/json"}, auth=tuple(ICINGA_AUTH.split(":")))
         if r.status_code != 200:
@@ -134,7 +134,7 @@ except:
     pass
 
 # configure client specific services if we have one instead of core ubirch services
-if UBIRCH_CLIENT is not None and UBIRCH_CLIENT.strip():
+if UBIRCH_CLIENT and UBIRCH_CLIENT.strip():
     # create a sub-class of the ubirch API to use
     class ClientAPI(ubirch.API):
         def __init__(self, client: str, auth: str = None, env: str = None, debug: bool = False) -> None:
@@ -238,7 +238,7 @@ MESSAGES_SENT: list = []
 
 
 def mqtt_connected(client, userdata, flags, rc):
-    if UBIRCH_CLIENT is not None:
+    if UBIRCH_CLIENT:
         client.subscribe("{}-{}/ubirch/devices/{}/processed".format(UBIRCH_CLIENT, UBIRCH_ENV, str(uuid)), qos=1)
     else:
         client.subscribe("ubirch-{}/ubirch/devices/{}/processed".format(UBIRCH_ENV, str(uuid)), qos=1)
@@ -267,7 +267,7 @@ def mqtt_received(client, userdata, msg):
 
 
 client = mqtt.Client(client_id=uuid.hex)
-if MQTT_USER is not None and MQTT_PASS is not None:
+if MQTT_USER and MQTT_PASS:
     client.username_pw_set(MQTT_USER, MQTT_PASS)
 if logger.level == logging.DEBUG:
     client.enable_logger(logger)
