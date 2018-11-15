@@ -33,7 +33,7 @@ import ubirch
 from ubirch.ubirch_api import AVATAR_SERVICE, KEY_SERVICE
 from ubirch.ubirch_protocol import UBIRCH_PROTOCOL_TYPE_REG
 
-logging.basicConfig(format='%(asctime)s %(name)20.20s %(levelname)-8.8s %(message)s', level=logging.DEBUG)
+logging.basicConfig(format='%(asctime)s %(name)20.20s %(levelname)-8.8s %(message)s', level=logging.INFO)
 logger = logging.getLogger()
 
 ERRORS = 0
@@ -82,9 +82,7 @@ def nagios(client, env, service, code, message="OK"):
     global ERRORS
 
     if not client: client = "ubirch"
-
-    if client:
-        env = client+"."+env
+    env = client+"."+env
 
     data = {
         "exit_status": code,
@@ -92,6 +90,16 @@ def nagios(client, env, service, code, message="OK"):
         "check_source": env,
         "ttl": 3600.0
     }
+
+    if code == NAGIOS_OK:
+        logger.info("{} service={}.ubirch.com!{} {}"
+                    .format(int(datetime.utcnow().timestamp()), env, service, json.dumps(data)))
+    elif code == NAGIOS_WARNING:
+        logger.warning("{} service={}.ubirch.com!{} {}"
+                    .format(int(datetime.utcnow().timestamp()), env, service, json.dumps(data)))
+    else:
+        logger.error("{} service={}.ubirch.com!{} {}"
+                    .format(int(datetime.utcnow().timestamp()), env, service, json.dumps(data)))
 
     if ICINGA_URL and ICINGA_AUTH:
         r = requests.post(ICINGA_URL + "?" + "service={}.ubirch.com!{}".format(env, service),
@@ -102,15 +110,6 @@ def nagios(client, env, service, code, message="OK"):
         else:
             logger.info("{}: {}".format(r.status_code, bytes.decode(r.content)))
 
-    if code == NAGIOS_OK:
-        logger.info("{} service={}.ubirch.com!{} {}"
-                    .format(int(datetime.utcnow().timestamp()), env, service, json.dumps(data)))
-    elif code == NAGIOS_WARNING:
-        logger.info("{} service={}.ubirch.com!{} {}"
-                    .format(int(datetime.utcnow().timestamp()), env, service, json.dumps(data)))
-    else:
-        logger.info("{} service={}.ubirch.com!{} {}"
-                    .format(int(datetime.utcnow().timestamp()), env, service, json.dumps(data)))
 
 
 class Proto(ubirch.Protocol):
@@ -154,6 +153,7 @@ proto = Proto(keystore)
 services = [KEY_SERVICE, AVATAR_SERVICE]  # , NOTARY_SERVICE, CHAIN_SERVICE]
 for service in services:
     try:
+        logger.info("DEEPCHECK: {}".format(api.get_url(service) + "/deepCheck"))
         r = requests.get(api.get_url(service) + "/deepCheck", timeout=1.0)
         try:
             response = r.json()
@@ -185,12 +185,15 @@ sk = keystore.find_signing_key(uuid)
 vk = keystore.find_verifying_key(uuid)
 
 # check, register and deregister key
-if api.is_identity_registered(uuid):
-    # remove any existing key
-    api.deregister_identity(str.encode(json.dumps({
-        "publicKey": bytes.decode(base64.b64encode(vk.to_bytes())),
-        "signature": bytes.decode(base64.b64encode(sk.sign(vk.to_bytes())))
-    })))
+try:
+    if api.is_identity_registered(uuid):
+        # remove any existing key
+        api.deregister_identity(str.encode(json.dumps({
+            "publicKey": bytes.decode(base64.b64encode(vk.to_bytes())),
+            "signature": bytes.decode(base64.b64encode(sk.sign(vk.to_bytes())))
+        })))
+except Exception as e:
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_ERROR, "{} {}".format(0, str(e)))
 
 # register key
 key_registration = proto.message_signed(uuid, UBIRCH_PROTOCOL_TYPE_REG, keystore.get_certificate(uuid))
