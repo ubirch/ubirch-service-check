@@ -196,12 +196,12 @@ try:
             "signature": bytes.decode(base64.b64encode(sk.sign(vk.to_bytes())))
         })))
         if r.status_code != 200:
-            nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_ERROR, "{} {}".format(0, bytes.decode(r.content)))
+            nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_ERROR, "{} {}".format(r.status_code, bytes.decode(r.content)))
 except Exception as e:
-    nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_ERROR, "{} {}".format(0, str(e)))
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_ERROR, "{}".format(str(e)))
 
 if api.is_identity_registered(uuid):
-    nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-register", NAGIOS_ERROR, "{} {}".format(0, "public key already registered"))
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-register", NAGIOS_ERROR, "{}".format(0, "public key already registered"))
     exit(-1)
 
 # register key
