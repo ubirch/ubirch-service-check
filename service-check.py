@@ -125,8 +125,6 @@ class Proto(ubirch.Protocol):
 # test UUID
 uuid = UUID(hex=os.getenv('UBIRCH_DEVICE_UUID', "00000000-0000-0000-0000-000000000000"))
 
-os.remove("service-check.jks")
-
 # temporary key store with fixed test-key
 keystore = ubirch.KeyStore("service-check.jks", 'service-check')
 try:
