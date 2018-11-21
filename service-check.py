@@ -33,7 +33,7 @@ import ubirch
 from ubirch.ubirch_api import AVATAR_SERVICE, KEY_SERVICE
 from ubirch.ubirch_protocol import UBIRCH_PROTOCOL_TYPE_REG
 
-logging.basicConfig(format='%(asctime)s %(name)20.20s %(levelname)-8.8s %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s %(name)20.20s %(levelname)-8.8s %(message)s', level=logging.DEBUG)
 logger = logging.getLogger()
 
 ERRORS = 0
@@ -82,6 +82,7 @@ def nagios(client, env, service, code, message="OK"):
     global ERRORS
 
     if not client: client = "ubirch"
+    if not env: env = "local"
     env = client+"."+env
 
     data = {
@@ -123,6 +124,8 @@ class Proto(ubirch.Protocol):
 
 # test UUID
 uuid = UUID(hex=os.getenv('UBIRCH_DEVICE_UUID', "00000000-0000-0000-0000-000000000000"))
+
+os.remove("service-check.jks")
 
 # temporary key store with fixed test-key
 keystore = ubirch.KeyStore("service-check.jks", 'service-check')
@@ -188,12 +191,18 @@ vk = keystore.find_verifying_key(uuid)
 try:
     if api.is_identity_registered(uuid):
         # remove any existing key
-        api.deregister_identity(str.encode(json.dumps({
+        r = api.deregister_identity(str.encode(json.dumps({
             "publicKey": bytes.decode(base64.b64encode(vk.to_bytes())),
             "signature": bytes.decode(base64.b64encode(sk.sign(vk.to_bytes())))
         })))
+        if r.status_code != 200:
+            nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_ERROR, "{} {}".format(0, bytes.decode(r.content)))
 except Exception as e:
     nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_ERROR, "{} {}".format(0, str(e)))
+
+if api.is_identity_registered(uuid):
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-register", NAGIOS_ERROR, "{} {}".format(0, "public key already registered"))
+    exit(-1)
 
 # register key
 key_registration = proto.message_signed(uuid, UBIRCH_PROTOCOL_TYPE_REG, keystore.get_certificate(uuid))
@@ -206,6 +215,9 @@ else:
     #              .format(UBIRCH_ENV, KEY_SERVICE, r.status_code, bytes.decode(r.content)))
     nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-register", NAGIOS_ERROR,
            "{} {}".format(r.status_code, bytes.decode(r.content)))
+
+MESSAGES_SENT: list = []
+ERROR_RESULTS = []
 
 # check if the device exists and delete if that is the case
 if api.device_exists(uuid):
@@ -237,7 +249,6 @@ else:
 
 connected_event = threading.Event()
 finished_event = threading.Event()
-MESSAGES_SENT: list = []
 
 
 def mqtt_connected(client, userdata, flags, rc):
@@ -296,7 +307,6 @@ for n in range(6, 11):
     msg = proto.message_chained(uuid, 0x53, {'ts': int(datetime.utcnow().timestamp()), 'v': n})
     MESSAGES_SENT.append(msg)
 
-ERROR_RESULTS = []
 # send out prepared messages
 for n, msg in enumerate(MESSAGES_SENT.copy()):
     r = api.send(msg)
