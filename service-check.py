@@ -199,7 +199,7 @@ except Exception as e:
     nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_ERROR, "{}".format(str(e)))
 
 if api.is_identity_registered(uuid):
-    nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-register", NAGIOS_ERROR, "{}".format(0, "public key already registered"))
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-register", NAGIOS_ERROR, "{}".format("public key already registered"))
     exit(-1)
 
 # register key
