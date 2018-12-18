@@ -38,6 +38,9 @@ logger = logging.getLogger()
 
 ERRORS = 0
 
+NEO4J_URL = os.getenv("NEO4J_URL")
+NEO4J_AUTH = os.getenv("NEO4J_AUTH")
+
 UBIRCH_CLIENT = os.getenv("UBIRCH_CLIENT")
 if UBIRCH_CLIENT and not UBIRCH_CLIENT.strip():
     UBIRCH_CLIENT = None
@@ -67,8 +70,9 @@ logger.debug("UBIRCH_CLIENT = '{}'".format(UBIRCH_CLIENT))
 logger.debug("UBIRCH_ENV    = '{}'".format(UBIRCH_ENV))
 logger.debug("UBIRCH_AUTH   = '{}'".format(UBIRCH_AUTH))
 logger.debug("MQTT_SERVER   = '{}:{}'".format(MQTT_SERVER, MQTT_PORT))
-logger.debug("MQTT_USER     = '{}'".format(MQTT_USER))
-logger.debug("MQTT_PASS     = '{}'".format(MQTT_PASS))
+logger.debug("MQTT_AUTH     = '{}:{}'".format(MQTT_USER, MQTT_PASS))
+logger.debug("NEOJ4_URL     = '{}'".format(NEO4J_URL))
+logger.debug("NEOJ4_AUTH    = '{}'".format(NEO4J_AUTH))
 
 logger.debug("ICINGA_URL    = '{}'".format(ICINGA_URL))
 logger.debug("ICINGA_AUTH   = '{}'".format(ICINGA_AUTH))
@@ -83,7 +87,7 @@ def nagios(client, env, service, code, message="OK"):
 
     if not client: client = "ubirch"
     if not env: env = "local"
-    env = client+"."+env
+    env = client + "." + env
 
     data = {
         "exit_status": code,
@@ -97,10 +101,10 @@ def nagios(client, env, service, code, message="OK"):
                     .format(int(datetime.utcnow().timestamp()), env, service, json.dumps(data)))
     elif code == NAGIOS_WARNING:
         logger.warning("{} service={}.ubirch.com!{} {}"
-                    .format(int(datetime.utcnow().timestamp()), env, service, json.dumps(data)))
+                       .format(int(datetime.utcnow().timestamp()), env, service, json.dumps(data)))
     else:
         logger.error("{} service={}.ubirch.com!{} {}"
-                    .format(int(datetime.utcnow().timestamp()), env, service, json.dumps(data)))
+                     .format(int(datetime.utcnow().timestamp()), env, service, json.dumps(data)))
 
     if ICINGA_URL and ICINGA_AUTH:
         r = requests.post(ICINGA_URL + "?" + "service={}.ubirch.com!{}".format(env, service),
@@ -110,7 +114,6 @@ def nagios(client, env, service, code, message="OK"):
             ERRORS += 1
         else:
             logger.info("{}: {}".format(r.status_code, bytes.decode(r.content)))
-
 
 
 class Proto(ubirch.Protocol):
@@ -124,6 +127,19 @@ class Proto(ubirch.Protocol):
 
 # test UUID
 uuid = UUID(hex=os.getenv('UBIRCH_DEVICE_UUID', "00000000-0000-0000-0000-000000000000"))
+
+if NEO4J_URL and NEO4J_AUTH:
+    r = requests.post(NEO4J_URL, json={"statements": [{
+        "statement": "MATCH (n:PublicKey) WHERE n.infoHwDeviceId='00000000-0000-0000-0000-000000000000' DELETE n;",
+    }]}, auth=tuple(NEO4J_AUTH.split(":")))
+    try:
+        errors = r.json()["errors"]
+        if len(errors):
+            logger.error("{}: {}".format(r.status_code, errors))
+        else:
+            logger.info("{}: {}".format(r.status_code, r.json()))
+    except Exception as e:
+        logger.error(bytes.decode(r.content), e)
 
 # temporary key store with fixed test-key
 keystore = ubirch.KeyStore("service-check.jks", 'service-check')
@@ -162,22 +178,23 @@ for service in services:
                 ERRORS += 1
                 # logger.error("{}.service.{}.deepCheck: FAILED: {} {}"
                 #              .format(UBIRCH_ENV, service, r.status_code, response['messages']))
-                nagios(UBIRCH_CLIENT, UBIRCH_ENV, service+"-deepCheck", NAGIOS_ERROR, r.status_code + " " + response['messages'])
+                nagios(UBIRCH_CLIENT, UBIRCH_ENV, service + "-deepCheck", NAGIOS_ERROR,
+                       r.status_code + " " + response['messages'])
             else:
                 # logger.info("{}.service.{}.deepCheck: OK".format(UBIRCH_ENV, service))
-                nagios(UBIRCH_CLIENT, UBIRCH_ENV, service+"-deepCheck", NAGIOS_OK)
+                nagios(UBIRCH_CLIENT, UBIRCH_ENV, service + "-deepCheck", NAGIOS_OK)
 
         except JSONDecodeError as e:
             ERRORS += 1
             # logger.error("{}.service.{}.deepCheck: FAILED: {} {}"
             #              .format(UBIRCH_ENV, service, r.status_code, bytes.decode(r.content).split('\n')[0]))
-            nagios(UBIRCH_CLIENT, UBIRCH_ENV, service+"-deepCheck", NAGIOS_ERROR,
+            nagios(UBIRCH_CLIENT, UBIRCH_ENV, service + "-deepCheck", NAGIOS_ERROR,
                    "{} {}".format(r.status_code, bytes.decode(r.content).split('\n')[0]))
 
     except Exception as e:
         ERRORS += 1
         # logger.error("{}.service.{}.deepCheck: FAILED: {}".format(UBIRCH_ENV, service, e.args))
-        nagios(UBIRCH_CLIENT, UBIRCH_ENV, service+"-deepCheck", NAGIOS_ERROR, str(e))
+        nagios(UBIRCH_CLIENT, UBIRCH_ENV, service + "-deepCheck", NAGIOS_ERROR, str(e))
 
 if not keystore.exists_signing_key(uuid):
     keystore.create_ed25519_keypair(uuid)
@@ -194,12 +211,14 @@ try:
             "signature": bytes.decode(base64.b64encode(sk.sign(vk.to_bytes())))
         })))
         if r.status_code != 200:
-            nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_ERROR, "{} {}".format(r.status_code, bytes.decode(r.content)))
+            nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_ERROR,
+                   "{} {}".format(r.status_code, bytes.decode(r.content)))
 except Exception as e:
     nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_ERROR, "{}".format(str(e)))
 
 if api.is_identity_registered(uuid):
-    nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-register", NAGIOS_ERROR, "{}".format("public key already registered"))
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-register", NAGIOS_ERROR,
+           "{}".format("public key already registered"))
     exit(-1)
 
 # register key
