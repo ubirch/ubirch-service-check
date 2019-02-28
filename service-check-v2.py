@@ -24,6 +24,9 @@ from uuid import UUID
 
 import requests
 import ubirch
+from ubirch.ubirch_protocol import UBIRCH_PROTOCOL_TYPE_REG
+
+import c8y_client
 
 LOGLEVEL = os.getenv("LOGLEVEL", "DEBUG").upper()
 logging.basicConfig(format='%(asctime)s %(name)20.20s %(levelname)-8.8s %(message)s', level=LOGLEVEL)
@@ -39,7 +42,8 @@ logger.debug("NEOJ4_AUTH    = '{}'".format(NEO4J_AUTH))
 
 class Proto(ubirch.Protocol):
 
-    def check_key(self, uuid: UUID) -> dict or None:
+    @staticmethod
+    def check_key(uuid: UUID) -> dict or None:
         if not (NEO4J_URL and NEO4J_AUTH): return
         r = requests.get(NEO4J_URL, json={"statements": [{
             "statement": "MATCH (n:PublicKey) WHERE n.infoHwDeviceId='{}' RETURN n;".format(str(uuid)),
@@ -65,6 +69,8 @@ class Proto(ubirch.Protocol):
 # test UUID
 uuid = UUID(hex=os.getenv('UBIRCH_DEVICE_UUID', "22222222-0000-0000-0000-000000000000"))
 
+c8y_client = c8y_client.client(uuid)
+
 # temporary key store with fixed test-key
 keystore = ubirch.KeyStore("service-check.jks", 'service-check')
 try:
@@ -84,6 +90,9 @@ vk = keystore.find_verifying_key(uuid)
 
 MESSAGES = []
 
+# msg = proto.message_signed(uuid, UBIRCH_PROTOCOL_TYPE_REG, keystore.get_certificate(uuid))
+# MESSAGES.append(msg)
+
 # send signed messages
 for n in range(1, 10):
     msg = proto.message_signed(uuid, 0x53, {'ts': int(datetime.utcnow().timestamp()), 'v': n})
@@ -94,11 +103,10 @@ for n in range(6, 11):
     MESSAGES.append(msg)
 
 # send out prepared messages
-for n, msg in enumerate(MESSAGES):
-    r = requests.post("http://localhost:8080", data=msg)
-    logger.debug(binascii.hexlify(msg))
-    if r.status_code == requests.codes.accepted:
+for n, msg in enumerate(MESSAGES[:1]):
+    r = requests.post("https://niomon.dev.ubirch.com", data=msg, auth=tuple(c8y_client.auth.split(":")))
+    if r.status_code == requests.codes.OK:
         logger.info("OK  {:02d} {}".format(n, binascii.hexlify(msg)))
     else:
-        logger.error("ERR {:02d} {}".format(n, binascii.hexlify(msg)))
-        logger.error("{} {}".format(r.status_code, bytes.decode(r.content)))
+        logger.error("ERR #{:03d} {}".format(n, binascii.hexlify(msg)))
+        logger.error("HTTP {:03d} {}".format(r.status_code, r.content))
