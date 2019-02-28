@@ -16,7 +16,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+import base64
 import binascii
+import json
 import logging
 import os
 from datetime import datetime
@@ -24,6 +26,7 @@ from uuid import UUID
 
 import requests
 import ubirch
+from ubirch import API
 from ubirch.ubirch_protocol import UBIRCH_PROTOCOL_TYPE_REG
 
 import c8y_client
@@ -79,6 +82,7 @@ try:
 except:
     pass
 
+api = API(auth=os.getenv("UBIRCH_AUTH"), env='dev', debug = True)
 proto = Proto(keystore)
 proto.check_key(uuid)
 
@@ -90,8 +94,24 @@ vk = keystore.find_verifying_key(uuid)
 
 MESSAGES = []
 
-# msg = proto.message_signed(uuid, UBIRCH_PROTOCOL_TYPE_REG, keystore.get_certificate(uuid))
-# MESSAGES.append(msg)
+msg = proto.message_signed(uuid, UBIRCH_PROTOCOL_TYPE_REG, keystore.get_certificate(uuid))
+if not api.is_identity_registered(uuid):
+    pubKeyInfo = keystore.get_certificate(uuid)
+    # create a json key registration request
+    pubKeyInfo['hwDeviceId'] = str(uuid)
+    pubKeyInfo['pubKey'] = base64.b64encode(pubKeyInfo['pubKey']).decode()
+    pubKeyInfo['pubKeyId'] = base64.b64encode(pubKeyInfo['pubKeyId']).decode()
+    pubKeyInfo['created'] = str(datetime.utcfromtimestamp(pubKeyInfo['created']).isoformat()+".000Z")
+    pubKeyInfo['validNotAfter'] = str(datetime.utcfromtimestamp(pubKeyInfo['validNotAfter']).isoformat()+".000Z")
+    pubKeyInfo['validNotBefore'] = str(datetime.utcfromtimestamp(pubKeyInfo['validNotBefore']).isoformat()+".000Z")
+    signature = base64.b64encode(proto._sign(uuid, json.dumps(pubKeyInfo, separators=(',', ':')).encode())).decode()
+    pubKeyRegMsg = {'pubKeyInfo': pubKeyInfo, 'signature': signature}
+    pubKeyRegMsgJson = json.dumps(pubKeyRegMsg).encode()
+    logger.info(pubKeyRegMsgJson)
+    logger.info(api.register_identity(pubKeyRegMsgJson).content.decode())
+
+# send the message the normal way as soon as the register service is in place
+#MESSAGES.append(msg)
 
 # send signed messages
 for n in range(1, 10):
@@ -103,7 +123,7 @@ for n in range(6, 11):
     MESSAGES.append(msg)
 
 # send out prepared messages
-for n, msg in enumerate(MESSAGES[:1]):
+for n, msg in enumerate(MESSAGES):
     r = requests.post("https://niomon.dev.ubirch.com", data=msg, auth=tuple(c8y_client.auth.split(":")))
     if r.status_code == requests.codes.OK:
         logger.info("OK  {:02d} {}".format(n, binascii.hexlify(msg)))
