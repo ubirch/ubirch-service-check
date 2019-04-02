@@ -21,6 +21,7 @@ import binascii
 import json
 import logging
 import os
+import secrets
 from datetime import datetime
 from uuid import UUID
 
@@ -70,7 +71,8 @@ class Proto(ubirch.Protocol):
 
 
 # test UUID
-uuid = UUID(hex=os.getenv('UBIRCH_DEVICE_UUID', "22222222-0000-0000-0000-000000000000"))
+rnduuid = binascii.hexlify(secrets.token_bytes(6)).decode()
+uuid = UUID(hex=os.getenv('UBIRCH_DEVICE_UUID', "22222222-0000-0000-0000-{}".format()))
 
 c8y_client = c8y_client.client(uuid)
 
