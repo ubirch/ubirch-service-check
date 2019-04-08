@@ -22,8 +22,9 @@ import json
 import logging
 import os
 import secrets
+from abc import ABC
 from datetime import datetime
-from uuid import UUID, uuid5, NAMESPACE_OID
+from uuid import UUID, uuid5
 
 import requests
 import ubirch
@@ -44,23 +45,27 @@ NEO4J_AUTH = os.getenv("NEO4J_AUTH")
 logger.debug("NEOJ4_URL     = '{}'".format(NEO4J_URL))
 logger.debug("NEOJ4_AUTH    = '{}'".format(NEO4J_AUTH))
 
-class Proto(ubirch.Protocol):
+
+class Proto(ubirch.Protocol, ABC):
 
     @staticmethod
     def check_key(uuid: UUID) -> dict or None:
-        if not (NEO4J_URL and NEO4J_AUTH): return
-        r = requests.get(NEO4J_URL, json={"statements": [{
+        if not (NEO4J_URL and NEO4J_AUTH):
+            return
+        check_response = requests.get(NEO4J_URL, json={"statements": [{
             "statement": "MATCH (n:PublicKey) WHERE n.infoHwDeviceId='{}' RETURN n;".format(str(uuid)),
         }]}, auth=tuple(NEO4J_AUTH.split(":")))
         try:
-            errors = r.json()["errors"]
+            errors = check_response.json()["errors"]
             if len(errors):
-                logger.error("Neo4J: errors while checking test UUID: {}: {}".format(r.status_code, errors))
+                logger.error("Neo4J: errors while checking test UUID: {}: {}"
+                             .format(check_response.status_code, errors))
             else:
-                logger.info("Neo4J: no errors checking test UUIDs: {}: {}".format(r.status_code, r.json()))
-            r.json()
+                logger.info("Neo4J: no errors checking test UUIDs: {}: {}"
+                            .format(check_response.status_code, check_response.json()))
+            check_response.json()
         except Exception as e:
-            logger.error(bytes.decode(r.content), e)
+            logger.error(bytes.decode(check_response.content), e)
 
     def __init__(self, key_store: ubirch.KeyStore) -> None:
         super().__init__()
@@ -72,69 +77,70 @@ class Proto(ubirch.Protocol):
 
 # test UUID
 randomTestUUID = None
-uuid = None
+testDeviceUUID = None
 uuidFileName, ext = os.path.splitext(__file__)
 try:
-    with open(uuidFileName+".uuid", "r") as f:
+    with open(uuidFileName + ".uuid", "r") as f:
         randomTestUUID = f.read()
-except:
+except IOError:
     BASE_UBIRCH_TEST = UUID("22222222-0000-0000-0000-000000000000")
     randomTestUUID = uuid5(BASE_UBIRCH_TEST, str(secrets.token_bytes(10)))
-    with open(uuidFileName+".uuid", "w") as f:
+    with open(uuidFileName + ".uuid", "w") as f:
         f.write(str(randomTestUUID))
 finally:
-    uuid = UUID(hex=os.getenv('UBIRCH_DEVICE_UUID', str(randomTestUUID)))
+    testDeviceUUID = UUID(hex=os.getenv('UBIRCH_DEVICE_UUID', str(randomTestUUID)))
 
-logger.info("** UUID: {}".format(uuid))
+logger.info("** UUID: {}".format(testDeviceUUID))
 
-c8y_client = c8y_client.client(uuid)
+c8y_client = c8y_client.client(testDeviceUUID)
 
 # temporary key store with fixed test-key
 keystore = ubirch.KeyStore("service-check.jks", 'service-check')
 try:
-    keystore.find_signing_key(uuid)
-    keystore.create_ed25519_keypair(uuid)
+    keystore.find_signing_key(testDeviceUUID)
+    keystore.create_ed25519_keypair(testDeviceUUID)
 except:
     pass
 
-api = API(auth=os.getenv("UBIRCH_AUTH"), env='dev', debug = True)
+api = API(auth=os.getenv("UBIRCH_AUTH"), env='dev', debug=True)
 proto = Proto(keystore)
-proto.check_key(uuid)
+proto.check_key(testDeviceUUID)
 
-if not keystore.exists_signing_key(uuid):
-    keystore.create_ed25519_keypair(uuid)
+if not keystore.exists_signing_key(testDeviceUUID):
+    keystore.create_ed25519_keypair(testDeviceUUID)
 
-sk = keystore.find_signing_key(uuid)
-vk = keystore.find_verifying_key(uuid)
+sk = keystore.find_signing_key(testDeviceUUID)
+vk = keystore.find_verifying_key(testDeviceUUID)
 
 MESSAGES = []
 
-msg = proto.message_signed(uuid, UBIRCH_PROTOCOL_TYPE_REG, keystore.get_certificate(uuid))
-if not api.is_identity_registered(uuid):
-    pubKeyInfo = keystore.get_certificate(uuid)
+msg = proto.message_signed(testDeviceUUID, UBIRCH_PROTOCOL_TYPE_REG, keystore.get_certificate(testDeviceUUID))
+if not api.is_identity_registered(testDeviceUUID):
+    pubKeyInfo = keystore.get_certificate(testDeviceUUID)
     # create a json key registration request
-    pubKeyInfo['hwDeviceId'] = str(uuid)
+    pubKeyInfo['hwDeviceId'] = str(testDeviceUUID)
     pubKeyInfo['pubKey'] = base64.b64encode(pubKeyInfo['pubKey']).decode()
     pubKeyInfo['pubKeyId'] = base64.b64encode(pubKeyInfo['pubKeyId']).decode()
-    pubKeyInfo['created'] = str(datetime.utcfromtimestamp(pubKeyInfo['created']).isoformat()+".000Z")
-    pubKeyInfo['validNotAfter'] = str(datetime.utcfromtimestamp(pubKeyInfo['validNotAfter']).isoformat()+".000Z")
-    pubKeyInfo['validNotBefore'] = str(datetime.utcfromtimestamp(pubKeyInfo['validNotBefore']).isoformat()+".000Z")
-    signature = base64.b64encode(proto._sign(uuid, json.dumps(pubKeyInfo, separators=(',', ':')).encode())).decode()
+    pubKeyInfo['created'] = str(datetime.utcfromtimestamp(pubKeyInfo['created']).isoformat() + ".000Z")
+    pubKeyInfo['validNotAfter'] = str(datetime.utcfromtimestamp(pubKeyInfo['validNotAfter']).isoformat() + ".000Z")
+    pubKeyInfo['validNotBefore'] = str(datetime.utcfromtimestamp(pubKeyInfo['validNotBefore']).isoformat() + ".000Z")
+    signed_message = proto._sign(testDeviceUUID, json.dumps(pubKeyInfo, separators=(',', ':')).encode())
+    signature = base64.b64encode(signed_message).decode()
     pubKeyRegMsg = {'pubKeyInfo': pubKeyInfo, 'signature': signature}
     pubKeyRegMsgJson = json.dumps(pubKeyRegMsg).encode()
     logger.info(pubKeyRegMsgJson)
     logger.info(api.register_identity(pubKeyRegMsgJson).content.decode())
 
 # send the message the normal way as soon as the register service is in place
-#MESSAGES.append(msg)
+# MESSAGES.append(msg)
 
 # send signed messages
 for n in range(1, 10):
-    msg = proto.message_signed(uuid, 0x53, {'ts': int(datetime.utcnow().timestamp()), 'v': n})
+    msg = proto.message_signed(testDeviceUUID, 0x53, {'ts': int(datetime.utcnow().timestamp()), 'v': n})
     MESSAGES.append(msg)
 # send chained messages
 for n in range(6, 11):
-    msg = proto.message_chained(uuid, 0x53, {'ts': int(datetime.utcnow().timestamp()), 'v': n})
+    msg = proto.message_chained(testDeviceUUID, 0x53, {'ts': int(datetime.utcnow().timestamp()), 'v': n})
     MESSAGES.append(msg)
 
 # send out prepared messages
