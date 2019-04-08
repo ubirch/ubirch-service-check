@@ -23,7 +23,7 @@ import logging
 import os
 import secrets
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, uuid5, NAMESPACE_OID
 
 import requests
 import ubirch
@@ -71,8 +71,21 @@ class Proto(ubirch.Protocol):
 
 
 # test UUID
-rnduuid = binascii.hexlify(secrets.token_bytes(6)).decode()
-uuid = UUID(hex=os.getenv('UBIRCH_DEVICE_UUID', "22222222-0000-0000-0000-{}".format()))
+randomTestUUID = None
+uuid = None
+uuidFileName, ext = os.path.splitext(__file__)
+try:
+    with open(uuidFileName+".uuid", "r") as f:
+        randomTestUUID = f.read()
+except:
+    BASE_UBIRCH_TEST = UUID("22222222-0000-0000-0000-000000000000")
+    randomTestUUID = uuid5(BASE_UBIRCH_TEST, str(secrets.token_bytes(10)))
+    with open(uuidFileName+".uuid", "w") as f:
+        f.write(str(randomTestUUID))
+finally:
+    uuid = UUID(hex=os.getenv('UBIRCH_DEVICE_UUID', str(randomTestUUID)))
+
+logger.info("** UUID: {}".format(uuid))
 
 c8y_client = c8y_client.client(uuid)
 

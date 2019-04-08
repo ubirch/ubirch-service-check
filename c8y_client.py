@@ -35,10 +35,10 @@ class C8yBootstrapClient:
         self.client.username_pw_set("management/devicebootstrap", password)
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
-        self.client.loop_start()
 
         self.client.tls_set()
         self.client.connect("ubirch.cumulocity.com", 8883)
+        self.client.loop_start()
 
         self.connected = False
         while not self.connected:
@@ -81,7 +81,6 @@ class C8yClient:
         self.client.on_connect = self.on_connect
         self.client.on_subscribe = self.on_subscribe
         self.client.on_publish = self.on_publish
-        self.client.loop_start()
 
         try: self.client.tls_set()
         except Exception as e:
@@ -89,8 +88,11 @@ class C8yClient:
 
         self.connected = False
         self.client.connect("{}.cumulocity.com".format(tenant), 8883)
+        self.client.loop_start()
+
         while not self.connected:
             time.sleep(1)
+        logger.info("connected to {}".format(tenant))
 
     def __del__(self):
         self.client.loop_stop()
@@ -124,13 +126,13 @@ def client(uuid: UUID):
     mqtt_client = mqtt.Client(client_id=str(uuid))
     auth_file = str(uuid) + ".auth"
     if os.path.isfile(auth_file):
-        with open(auth_file) as f:
+        with open(auth_file, "r") as f:
             auth = f.read().encode()
     else:
         auth = os.getenv("C8Y_AUTH", "")
         bootstrap_client = C8yBootstrapClient(mqtt_client, auth)
         auth = bootstrap_client.get_authorization()
-        with open(auth_file) as f:
+        with open(auth_file, "wb") as f:
             f.write(auth)
 
     (tenant, username, password) = auth[3:].decode().split(",")
