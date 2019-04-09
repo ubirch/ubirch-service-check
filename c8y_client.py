@@ -140,7 +140,7 @@ def client(uuid: UUID):
 
 
 def __main():
-    uuid = UUID(hex=os.getenv("C8Y_DEVICE_ID", "22222222-0000-0000-0000-000000000000"))
+    uuid = UUID(hex=os.getenv("C8Y_DEVICE_ID", "40506600-0AEE-40E7-8596-C721D73B1A6E"))
     c8y_client = client(uuid)
     try:
         while True:
