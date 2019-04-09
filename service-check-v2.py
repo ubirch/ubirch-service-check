@@ -138,14 +138,14 @@ if not api.is_identity_registered(testDeviceUUID):
 # send signed messages
 for n in range(1, 10):
     timestamp = datetime.utcnow()
-    c8y_client.publish("s/us", "200,customValue,custom,{},X".format(n, timestamp.isoformat()))
+    c8y_client.publish("s/us", "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat()))
     msg = proto.message_signed(testDeviceUUID, 0x53, {'ts': int(timestamp.timestamp()), 'v': n})
     MESSAGES.append(msg)
     time.sleep(1)
 # send chained messages
 for n in range(6, 11):
     timestamp = datetime.utcnow()
-    c8y_client.publish("s/us", "200,customValue,custom,{},X".format(n, timestamp.isoformat()))
+    c8y_client.publish("s/us", "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat()))
     msg = proto.message_chained(testDeviceUUID, 0x53, {'ts': int(timestamp.timestamp()), 'v': n})
     MESSAGES.append(msg)
     time.sleep(1)
