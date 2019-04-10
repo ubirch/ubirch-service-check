@@ -135,6 +135,8 @@ if not api.is_identity_registered(testDeviceUUID):
 # send the message the normal way as soon as the register service is in place
 # MESSAGES.append(msg)
 
+c8y_client.publish("s/us", f"110,{testDeviceUUID}, ,0.0.2")
+
 # send signed messages
 for n in range(1, 10):
     timestamp = datetime.utcnow()
