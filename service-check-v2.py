@@ -27,6 +27,7 @@ from abc import ABC
 from datetime import datetime
 from uuid import UUID, uuid5
 
+import ed25519
 import requests
 import ubirch
 from ubirch import API
@@ -71,14 +72,22 @@ class Proto(ubirch.Protocol, ABC):
     def __init__(self, key_store: ubirch.KeyStore) -> None:
         super().__init__()
         self.__ks = key_store
+        self.__ks.insert_ed25519_verifying_key(UUID("e97e160c61175b89ac9815aeb52655e0"),
+                                               ed25519.VerifyingKey("a2403b92bc9add365b3cd12ff120d020647f84ea6983f98bc4c87e0f4be8cd66", encoding='hex'))
 
     def _sign(self, uuid: UUID, message: bytes) -> bytes:
         return self.__ks.find_signing_key(uuid).sign(message)
 
+    def _verify(self, uuid: UUID, message: bytes, signature: bytes):
+        return self.__ks.find_verifying_key(uuid).verify(signature, message)
+
 
 # test UUID
 randomTestUUID = None
-testDeviceUUID = None
+testDeviceUUID = {
+    'Ed25519': None,
+    'ECDSA': None
+}
 uuidFileName, ext = os.path.splitext(__file__)
 try:
     with open(uuidFileName + ".uuid", "r") as f:
@@ -89,35 +98,39 @@ except IOError:
     with open(uuidFileName + ".uuid", "w") as f:
         f.write(str(randomTestUUID))
 finally:
-    testDeviceUUID = UUID(hex=os.getenv('UBIRCH_DEVICE_UUID', str(randomTestUUID)))
+    testDeviceUUID['Ed25519'] = UUID(hex=os.getenv('UBIRCH_DEVICE_UUID', str(randomTestUUID)))
+    testDeviceUUID['ECDSA'] = uuid5(testDeviceUUID['Ed25519'], "ECDSA")
 
-logger.info("** UUID: {}".format(testDeviceUUID))
+logger.info("** UUID (Ed25519): {}".format(testDeviceUUID['Ed25519']))
+logger.info("** UUID (ECDSA)  : {}".format(testDeviceUUID['ECDSA']))
 
-c8y_client = c8y_client.client(testDeviceUUID)
+c8y_client = c8y_client.client(testDeviceUUID['Ed25519'])
 
 # temporary key store with fixed test-key
 keystore = ubirch.KeyStore("service-check.jks", 'service-check')
 try:
-    keystore.find_signing_key(testDeviceUUID)
-    keystore.create_ed25519_keypair(testDeviceUUID)
+    keystore.find_signing_key(testDeviceUUID['Ed25519'])
+    keystore.create_ed25519_keypair(testDeviceUUID['Ed25519'])
 except:
     pass
 
 api = API(auth=os.getenv("UBIRCH_AUTH"), env='dev', debug=True)
 proto = Proto(keystore)
-proto.check_key(testDeviceUUID)
+proto.check_key(testDeviceUUID['Ed25519'])
 
-if not keystore.exists_signing_key(testDeviceUUID):
-    keystore.create_ed25519_keypair(testDeviceUUID)
+if not keystore.exists_signing_key(testDeviceUUID['Ed25519']):
+    keystore.create_ed25519_keypair(testDeviceUUID['Ed25519'])
 
-sk = keystore.find_signing_key(testDeviceUUID)
-vk = keystore.find_verifying_key(testDeviceUUID)
+
+sk = keystore.find_signing_key(testDeviceUUID['Ed25519'])
+vk = keystore.find_verifying_key(testDeviceUUID['Ed25519'])
 
 MESSAGES = []
 
-msg = proto.message_signed(testDeviceUUID, UBIRCH_PROTOCOL_TYPE_REG, keystore.get_certificate(testDeviceUUID))
-if not api.is_identity_registered(testDeviceUUID):
-    pubKeyInfo = keystore.get_certificate(testDeviceUUID)
+msg = proto.message_signed(testDeviceUUID['Ed25519'], UBIRCH_PROTOCOL_TYPE_REG,
+                           keystore.get_certificate(testDeviceUUID['Ed25519']))
+if not api.is_identity_registered(testDeviceUUID['Ed25519']):
+    pubKeyInfo = keystore.get_certificate(testDeviceUUID['Ed25519'])
     # create a json key registration request
     pubKeyInfo['hwDeviceId'] = str(testDeviceUUID)
     pubKeyInfo['pubKey'] = base64.b64encode(pubKeyInfo['pubKey']).decode()
@@ -125,15 +138,12 @@ if not api.is_identity_registered(testDeviceUUID):
     pubKeyInfo['created'] = str(datetime.utcfromtimestamp(pubKeyInfo['created']).isoformat() + ".000Z")
     pubKeyInfo['validNotAfter'] = str(datetime.utcfromtimestamp(pubKeyInfo['validNotAfter']).isoformat() + ".000Z")
     pubKeyInfo['validNotBefore'] = str(datetime.utcfromtimestamp(pubKeyInfo['validNotBefore']).isoformat() + ".000Z")
-    signed_message = proto._sign(testDeviceUUID, json.dumps(pubKeyInfo, separators=(',', ':')).encode())
+    signed_message = proto._sign(testDeviceUUID['Ed25519'], json.dumps(pubKeyInfo, separators=(',', ':')).encode())
     signature = base64.b64encode(signed_message).decode()
     pubKeyRegMsg = {'pubKeyInfo': pubKeyInfo, 'signature': signature}
     pubKeyRegMsgJson = json.dumps(pubKeyRegMsg).encode()
     logger.info(pubKeyRegMsgJson)
     logger.info(api.register_identity(pubKeyRegMsgJson).content.decode())
-
-# send the message the normal way as soon as the register service is in place
-# MESSAGES.append(msg)
 
 c8y_client.publish("s/us", f"110,{testDeviceUUID}, ,0.0.2")
 
@@ -141,14 +151,14 @@ c8y_client.publish("s/us", f"110,{testDeviceUUID}, ,0.0.2")
 for n in range(1, 10):
     timestamp = datetime.utcnow()
     c8y_client.publish("s/us", "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat()))
-    msg = proto.message_signed(testDeviceUUID, 0x53, {'ts': int(timestamp.timestamp()), 'v': n})
+    msg = proto.message_signed(testDeviceUUID['Ed25519'], 0x53, {'ts': int(timestamp.timestamp()), 'v': n})
     MESSAGES.append(msg)
     time.sleep(1)
 # send chained messages
 for n in range(6, 11):
     timestamp = datetime.utcnow()
     c8y_client.publish("s/us", "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat()))
-    msg = proto.message_chained(testDeviceUUID, 0x53, {'ts': int(timestamp.timestamp()), 'v': n})
+    msg = proto.message_chained(testDeviceUUID['Ed25519'], 0x53, {'ts': int(timestamp.timestamp()), 'v': n})
     MESSAGES.append(msg)
     time.sleep(1)
 
@@ -156,7 +166,7 @@ for n in range(6, 11):
 for n, msg in enumerate(MESSAGES):
     r = requests.post("https://niomon.dev.ubirch.com", data=msg, auth=tuple(c8y_client.auth.split(":")))
     if r.status_code == requests.codes.OK:
-        logger.info("OK  {:02d} {}".format(n, binascii.hexlify(msg)))
+        logger.info("OK  {:02d} {}".format(n, repr(proto.message_verify(r.content))))
     else:
         logger.error("ERR #{:03d} {}".format(n, binascii.hexlify(msg)))
         logger.error("HTTP {:03d} {}".format(r.status_code, r.content))
