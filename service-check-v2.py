@@ -47,9 +47,9 @@ NEO4J_AUTH = os.getenv("NEO4J_AUTH")
 C8Y_CLIENT_AUTH = os.getenv("C8Y_CLIENT_AUTH")
 
 
-logger.debug("TEST_UUID       = '{}'".format(TEST_UUID))
 logger.debug("NEOJ4_URL       = '{}'".format(NEO4J_URL))
 logger.debug("NEOJ4_AUTH      = '{}'".format(NEO4J_AUTH))
+logger.debug("TEST_UUID       = '{}'".format(TEST_UUID))
 logger.debug("C8Y_CLIENT_AUTH = '{}'".format(C8Y_CLIENT_AUTH))
 
 
