@@ -178,6 +178,7 @@ for n in range(6, 11):
     MESSAGES.append(msg)
     time.sleep(1)
 
+ERRORS = 0
 # send out prepared messages
 for n, msg in enumerate(MESSAGES):
     r = requests.post("https://niomon.dev.ubirch.com", data=msg, auth=tuple(c8y_client.auth.split(":")))
@@ -186,3 +187,10 @@ for n, msg in enumerate(MESSAGES):
     else:
         logger.error("ERR #{:03d} {}".format(n, binascii.hexlify(msg)))
         logger.error("HTTP {:03d} {}".format(r.status_code, r.content))
+        ERRORS += 1
+
+if ERRORS > 0:
+    # nagios(UBIRCH_CLIENT, UBIRCH_ENV, "ubirch", NAGIOS_ERROR,
+    #        "{} messages missing, total {} errors\n{}".format(len(MESSAGES_SENT), ERRORS, "\n".join(ERROR_RESULTS)))
+    logger.error("TOTAL ERRORS: {}".format(ERRORS))
+    exit(-1)
