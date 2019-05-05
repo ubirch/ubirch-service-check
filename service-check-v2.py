@@ -148,7 +148,7 @@ msg = proto.message_signed(testDeviceUUID['Ed25519'], UBIRCH_PROTOCOL_TYPE_REG,
 if not api.is_identity_registered(testDeviceUUID['Ed25519']):
     pubKeyInfo = keystore.get_certificate(testDeviceUUID['Ed25519'])
     # create a json key registration request
-    pubKeyInfo['hwDeviceId'] = str(testDeviceUUID)
+    pubKeyInfo['hwDeviceId'] = str(testDeviceUUID['Ed25519'])
     pubKeyInfo['pubKey'] = base64.b64encode(pubKeyInfo['pubKey']).decode()
     pubKeyInfo['pubKeyId'] = base64.b64encode(pubKeyInfo['pubKeyId']).decode()
     pubKeyInfo['created'] = str(datetime.utcfromtimestamp(pubKeyInfo['created']).isoformat() + ".000Z")
@@ -161,7 +161,7 @@ if not api.is_identity_registered(testDeviceUUID['Ed25519']):
     logger.info(pubKeyRegMsgJson)
     logger.info(api.register_identity(pubKeyRegMsgJson).content.decode())
 
-c8y_client.publish("s/us", f"110,{testDeviceUUID}, ,0.0.2")
+c8y_client.publish("s/us", f"110,{testDeviceUUID['Ed25519']}, ,0.0.2")
 
 # send signed messages
 for n in range(1, 10):
