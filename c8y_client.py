@@ -122,18 +122,21 @@ class C8yClient:
             self.receivedMessages.remove(mid)
 
 
-def client(uuid: UUID):
+def client(uuid: UUID, injected_auth=None):
     mqtt_client = mqtt.Client(client_id=str(uuid))
-    auth_file = str(uuid) + ".auth"
-    if os.path.isfile(auth_file):
-        with open(auth_file, "r") as f:
-            auth = f.read().encode()
+    if injected_auth:
+        auth = injected_auth
     else:
-        auth = os.getenv("C8Y_AUTH", "")
-        bootstrap_client = C8yBootstrapClient(mqtt_client, auth)
-        auth = bootstrap_client.get_authorization()
-        with open(auth_file, "wb") as f:
-            f.write(auth)
+        auth_file = str(uuid) + ".auth"
+        if os.path.isfile(auth_file):
+            with open(auth_file, "r") as f:
+                auth = f.read().encode()
+        else:
+            auth = os.getenv("C8Y_AUTH", "")
+            bootstrap_client = C8yBootstrapClient(mqtt_client, auth)
+            auth = bootstrap_client.get_authorization()
+            with open(auth_file, "wb") as f:
+                f.write(auth)
 
     (tenant, username, password) = auth[3:].decode().split(",")
     return C8yClient(mqtt_client, tenant, username+":"+password)

@@ -324,7 +324,7 @@ for n, msg in enumerate(MESSAGES_SENT.copy()):
         logger.error("{}.service.{}.message.{}.send: FAILED: {} {}"
                     .format(UBIRCH_ENV, AVATAR_SERVICE, n, r.status_code, bytes.decode(r.content)))
 
-finished_event.wait(timeout=30)
+finished_event.wait(timeout=60)
 if len(MESSAGES_SENT) == 0:
     logger.info("{}.service.{}.mqtt: OK".format(UBIRCH_ENV, AVATAR_SERVICE))
 else:

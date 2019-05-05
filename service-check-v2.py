@@ -41,11 +41,16 @@ logger = logging.getLogger()
 
 ERRORS = 0
 
+TEST_UUID = os.getenv("TEST_UUID")
 NEO4J_URL = os.getenv("NEO4J_URL")
 NEO4J_AUTH = os.getenv("NEO4J_AUTH")
+C8Y_CLIENT_AUTH = os.getenv("C8Y_CLIENT_AUTH")
 
-logger.debug("NEOJ4_URL     = '{}'".format(NEO4J_URL))
-logger.debug("NEOJ4_AUTH    = '{}'".format(NEO4J_AUTH))
+
+logger.debug("TEST_UUID       = '{}'".format(TEST_UUID))
+logger.debug("NEOJ4_URL       = '{}'".format(NEO4J_URL))
+logger.debug("NEOJ4_AUTH      = '{}'".format(NEO4J_AUTH))
+logger.debug("C8Y_CLIENT_AUTH = '{}'".format(C8Y_CLIENT_AUTH))
 
 
 class Proto(ubirch.Protocol, ABC):
@@ -90,8 +95,11 @@ testDeviceUUID = {
 }
 uuidFileName, ext = os.path.splitext(__file__)
 try:
-    with open(uuidFileName + ".uuid", "r") as f:
-        randomTestUUID = f.read()
+    if TEST_UUID:
+        randomTestUUID = TEST_UUID
+    else:
+        with open(uuidFileName + ".uuid", "r") as f:
+            randomTestUUID = f.read()
 except IOError:
     BASE_UBIRCH_TEST = UUID("22222222-0000-0000-0000-000000000000")
     randomTestUUID = uuid5(BASE_UBIRCH_TEST, str(secrets.token_bytes(10)))
@@ -104,7 +112,7 @@ finally:
 logger.info("** UUID (Ed25519): {}".format(testDeviceUUID['Ed25519']))
 logger.info("** UUID (ECDSA)  : {}".format(testDeviceUUID['ECDSA']))
 
-c8y_client = c8y_client.client(testDeviceUUID['Ed25519'])
+c8y_client = c8y_client.client(testDeviceUUID['Ed25519'], C8Y_CLIENT_AUTH)
 
 # temporary key store with fixed test-key
 keystore = ubirch.KeyStore("service-check.jks", 'service-check')
@@ -120,7 +128,6 @@ proto.check_key(testDeviceUUID['Ed25519'])
 
 if not keystore.exists_signing_key(testDeviceUUID['Ed25519']):
     keystore.create_ed25519_keypair(testDeviceUUID['Ed25519'])
-
 
 sk = keystore.find_signing_key(testDeviceUUID['Ed25519'])
 vk = keystore.find_verifying_key(testDeviceUUID['Ed25519'])
