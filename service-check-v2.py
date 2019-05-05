@@ -181,14 +181,14 @@ for n in range(6, 11):
 ERRORS = 0
 # send out prepared messages
 for n, msg in enumerate(MESSAGES):
-    r = requests.post("https://niomon.dev.ubirch.com", data=msg, auth=tuple(c8y_client.auth.split(":")))
+    r = requests.post("https://niomon.dev.ubirch.com/", data=msg, auth=tuple(c8y_client.auth.split(":")))
     if r.status_code == requests.codes.OK:
         try:
             logger.info("OK  {:02d} {}".format(n, repr(proto.message_verify(r.content))))
         except Exception as e:
-            logger.error("ERR verification failed: {}".format(binascii.hexlify(r.content).decode()))
+            logger.error("ERR #{:03d} verification failed: {}".format(n, binascii.hexlify(r.content).decode()))
     else:
-        logger.error("ERR #{:03d} {}".format(n, binascii.hexlify(msg)))
+        logger.error("ERR #{:03d} {}".format(n, binascii.hexlify(msg).decode()))
         logger.error("HTTP {:03d} {}".format(r.status_code, r.content))
         ERRORS += 1
 
