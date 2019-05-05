@@ -132,7 +132,7 @@ except:
 
 api = API(auth=os.getenv("UBIRCH_AUTH"), env='dev', debug=True)
 proto = Proto(keystore)
-proto.check_key(testDeviceUUID['Ed25519'])
+# proto.check_key(testDeviceUUID['Ed25519'])
 
 if not keystore.exists_signing_key(testDeviceUUID['Ed25519']):
     keystore.create_ed25519_keypair(testDeviceUUID['Ed25519'])
