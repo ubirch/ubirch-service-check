@@ -186,7 +186,7 @@ for n, msg in enumerate(MESSAGES):
         try:
             logger.info("OK  {:02d} {}".format(n, repr(proto.message_verify(r.content))))
         except Exception as e:
-            logger.error("ERR verification failed: {}".format(repr(r.content)))
+            logger.error("ERR verification failed: {}".format(binascii.hexlify(r.content).decode()))
     else:
         logger.error("ERR #{:03d} {}".format(n, binascii.hexlify(msg)))
         logger.error("HTTP {:03d} {}".format(r.status_code, r.content))
