@@ -80,9 +80,13 @@ class Proto(ubirch.Protocol, ABC):
         super().__init__()
         self.__ks = key_store
         if TEST_KEYS and TEST_UUID:
-            self.__ks.insert_ed25519_keypair(UUID(hex=TEST_UUID),
-                                             ed25519.VerifyingKey(TEST_KEYS[65:], encoding='hex'),
-                                             ed25519.SigningKey(TEST_KEYS[0:65], encoding='hex'))
+            try:
+                self.__ks.insert_ed25519_keypair(UUID(hex=TEST_UUID),
+                                                 ed25519.VerifyingKey(TEST_KEYS[64:].encode(), encoding='hex'),
+                                                 ed25519.SigningKey(TEST_KEYS.encode(), encoding='hex'))
+            except Exception as e:
+                logger.error(e)
+                pass
 
     def _sign(self, uuid: UUID, message: bytes) -> bytes:
         return self.__ks.find_signing_key(uuid).sign(message)
