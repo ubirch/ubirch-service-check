@@ -343,7 +343,7 @@ else:
     nagios(UBIRCH_CLIENT, UBIRCH_ENV, AVATAR_SERVICE + "-device-delete", NAGIOS_ERROR, "failed")
 
 # delete key (IGNORED UNTIL KEY SERVER IS FIXED, IS DELETED VIA NEO4J ANYWAY)
-if False:
+if UBIRCH_ENV == 'dev':
     r = api.deregister_identity(str.encode(json.dumps({
         "publicKey": bytes.decode(base64.b64encode(vk.to_bytes())),
         "signature": bytes.decode(base64.b64encode(sk.sign(vk.to_bytes())))
