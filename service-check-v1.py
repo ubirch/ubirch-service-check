@@ -342,20 +342,21 @@ else:
     # logger.error("{}.service.{}.device_delete: FAILED".format(UBIRCH_ENV, AVATAR_SERVICE))
     nagios(UBIRCH_CLIENT, UBIRCH_ENV, AVATAR_SERVICE + "-device-delete", NAGIOS_ERROR, "failed")
 
-# delete key
-r = api.deregister_identity(str.encode(json.dumps({
-    "publicKey": bytes.decode(base64.b64encode(vk.to_bytes())),
-    "signature": bytes.decode(base64.b64encode(sk.sign(vk.to_bytes())))
-})))
-if r.status_code == requests.codes.ok:
-    # logger.info("{}.service.{}.deregister_identity: OK".format(UBIRCH_ENV, KEY_SERVICE))
-    nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_OK)
-else:
-    ERRORS += 1
-    # logger.error("{}.service.{}.deregister_identity: FAILED: {}"
-    #              .format(UBIRCH_ENV, KEY_SERVICE, bytes.decode(r.content)))
-    nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_ERROR,
-           "{} {}".format(r.status_code, bytes.decode(r.content)))
+# delete key (IGNORED UNTIL KEY SERVER IS FIXED, IS DELETED VIA NEO4J ANYWAY)
+if False:
+    r = api.deregister_identity(str.encode(json.dumps({
+        "publicKey": bytes.decode(base64.b64encode(vk.to_bytes())),
+        "signature": bytes.decode(base64.b64encode(sk.sign(vk.to_bytes())))
+    })))
+    if r.status_code == requests.codes.ok:
+        # logger.info("{}.service.{}.deregister_identity: OK".format(UBIRCH_ENV, KEY_SERVICE))
+        nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_OK)
+    else:
+        ERRORS += 1
+        # logger.error("{}.service.{}.deregister_identity: FAILED: {}"
+        #              .format(UBIRCH_ENV, KEY_SERVICE, bytes.decode(r.content)))
+        nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_ERROR,
+               "{} {}".format(r.status_code, bytes.decode(r.content)))
 
 if ERRORS > 0:
     nagios(UBIRCH_CLIENT, UBIRCH_ENV, "ubirch", NAGIOS_ERROR,
