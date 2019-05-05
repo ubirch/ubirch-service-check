@@ -129,8 +129,8 @@ def client(uuid: UUID, injected_auth=None):
     else:
         auth_file = str(uuid) + ".auth"
         if os.path.isfile(auth_file):
-            with open(auth_file, "r") as f:
-                auth = f.read().encode()
+            with open(auth_file, "rb") as f:
+                auth = f.read().decode()
         else:
             auth = os.getenv("C8Y_AUTH", "")
             bootstrap_client = C8yBootstrapClient(mqtt_client, auth)
@@ -138,7 +138,7 @@ def client(uuid: UUID, injected_auth=None):
             with open(auth_file, "wb") as f:
                 f.write(auth)
 
-    (tenant, username, password) = auth[3:].decode().split(",")
+    (tenant, username, password) = auth[3:].split(",")
     return C8yClient(mqtt_client, tenant, username+":"+password)
 
 
