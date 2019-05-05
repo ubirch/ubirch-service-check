@@ -42,6 +42,7 @@ logger = logging.getLogger()
 ERRORS = 0
 
 TEST_UUID = os.getenv("TEST_UUID")
+TEST_KEYS = os.getenv("TEST_KEYS")
 NEO4J_URL = os.getenv("NEO4J_URL")
 NEO4J_AUTH = os.getenv("NEO4J_AUTH")
 C8Y_CLIENT_AUTH = os.getenv("C8Y_CLIENT_AUTH")
@@ -50,6 +51,7 @@ C8Y_CLIENT_AUTH = os.getenv("C8Y_CLIENT_AUTH")
 logger.debug("NEOJ4_URL       = '{}'".format(NEO4J_URL))
 logger.debug("NEOJ4_AUTH      = '{}'".format(NEO4J_AUTH))
 logger.debug("TEST_UUID       = '{}'".format(TEST_UUID))
+logger.debug("TEST_KEYS       = '{}'".format(TEST_KEYS))
 logger.debug("C8Y_CLIENT_AUTH = '{}'".format(C8Y_CLIENT_AUTH))
 
 
@@ -77,8 +79,10 @@ class Proto(ubirch.Protocol, ABC):
     def __init__(self, key_store: ubirch.KeyStore) -> None:
         super().__init__()
         self.__ks = key_store
-        self.__ks.insert_ed25519_verifying_key(UUID("e97e160c61175b89ac9815aeb52655e0"),
-                                               ed25519.VerifyingKey("a2403b92bc9add365b3cd12ff120d020647f84ea6983f98bc4c87e0f4be8cd66", encoding='hex'))
+        if TEST_KEYS and TEST_UUID:
+            self.__ks.insert_ed25519_keypair(UUID(hex=TEST_UUID),
+                                             ed25519.VerifyingKey(TEST_KEYS[65:], encoding='hex'),
+                                             ed25519.SigningKey(TEST_KEYS[0:65], encoding='hex'))
 
     def _sign(self, uuid: UUID, message: bytes) -> bytes:
         return self.__ks.find_signing_key(uuid).sign(message)
@@ -95,18 +99,18 @@ testDeviceUUID = {
 }
 uuidFileName, ext = os.path.splitext(__file__)
 try:
-    if TEST_UUID:
-        randomTestUUID = TEST_UUID
-    else:
-        with open(uuidFileName + ".uuid", "r") as f:
-            randomTestUUID = f.read()
+    with open(uuidFileName + ".uuid", "r") as f:
+        randomTestUUID = f.read()
 except IOError:
     BASE_UBIRCH_TEST = UUID("22222222-0000-0000-0000-000000000000")
     randomTestUUID = uuid5(BASE_UBIRCH_TEST, str(secrets.token_bytes(10)))
     with open(uuidFileName + ".uuid", "w") as f:
         f.write(str(randomTestUUID))
 finally:
-    testDeviceUUID['Ed25519'] = UUID(hex=os.getenv('UBIRCH_DEVICE_UUID', str(randomTestUUID)))
+    if TEST_UUID:
+        testDeviceUUID['Ed25519'] = UUID(hex=TEST_UUID)
+    else:
+        testDeviceUUID['Ed25519'] = UUID(str(randomTestUUID))
     testDeviceUUID['ECDSA'] = uuid5(testDeviceUUID['Ed25519'], "ECDSA")
 
 logger.info("** UUID (Ed25519): {}".format(testDeviceUUID['Ed25519']))
@@ -128,6 +132,7 @@ proto.check_key(testDeviceUUID['Ed25519'])
 
 if not keystore.exists_signing_key(testDeviceUUID['Ed25519']):
     keystore.create_ed25519_keypair(testDeviceUUID['Ed25519'])
+
 
 sk = keystore.find_signing_key(testDeviceUUID['Ed25519'])
 vk = keystore.find_verifying_key(testDeviceUUID['Ed25519'])
