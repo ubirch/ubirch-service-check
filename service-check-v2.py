@@ -25,9 +25,10 @@ import os
 import secrets
 import time
 from abc import ABC
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID, uuid5
 
+import ecdsa as ecdsa
 import ed25519
 import requests
 import ubirch
@@ -43,7 +44,8 @@ logger = logging.getLogger()
 ERRORS = 0
 
 TEST_UUID = os.getenv("TEST_UUID")
-TEST_KEYS = os.getenv("TEST_KEYS")
+TEST_KEY_EDDSA = os.getenv("TEST_KEY_EDDSA")
+TEST_KEY_ECDSA = os.getenv("TEST_KEY_ECDSA")
 NEO4J_URL = os.getenv("NEO4J_URL")
 NEO4J_AUTH = os.getenv("NEO4J_AUTH")
 C8Y_CLIENT_AUTH = os.getenv("C8Y_CLIENT_AUTH")
@@ -52,49 +54,48 @@ C8Y_CLIENT_AUTH = os.getenv("C8Y_CLIENT_AUTH")
 logger.debug("NEOJ4_URL       = '{}'".format(NEO4J_URL))
 logger.debug("NEOJ4_AUTH      = '{}'".format(NEO4J_AUTH))
 logger.debug("TEST_UUID       = '{}'".format(TEST_UUID))
-logger.debug("TEST_KEYS       = '{}'".format(TEST_KEYS))
+logger.debug("TEST_KEY_EDDSA  = '{}'".format(TEST_KEY_EDDSA))
+logger.debug("TEST_KEY_ECDSA  = '{}'".format(TEST_KEY_ECDSA))
 logger.debug("C8Y_CLIENT_AUTH = '{}'".format(C8Y_CLIENT_AUTH))
 
+SERVER_EDDSA_KEY = "a2403b92bc9add365b3cd12ff120d020647f84ea6983f98bc4c87e0f4be8cd66"
 
 class Proto(ubirch.Protocol, ABC):
+    __vk = {}
+    __sk = {}
 
-    @staticmethod
-    def check_key(uuid: UUID) -> dict or None:
-        if not (NEO4J_URL and NEO4J_AUTH):
-            return
-        check_response = requests.get(NEO4J_URL, json={"statements": [{
-            "statement": "MATCH (n:PublicKey) WHERE n.infoHwDeviceId='{}' RETURN n;".format(str(uuid)),
-        }]}, auth=tuple(NEO4J_AUTH.split(":")))
-        try:
-            errors = check_response.json()["errors"]
-            if len(errors):
-                logger.error("Neo4J: errors while checking test UUID: {}: {}"
-                             .format(check_response.status_code, errors))
-            else:
-                logger.info("Neo4J: no errors checking test UUIDs: {}: {}"
-                            .format(check_response.status_code, check_response.json()))
-            check_response.json()
-        except Exception as e:
-            logger.error(bytes.decode(check_response.content), e)
-
-    def __init__(self, key_store: ubirch.KeyStore) -> None:
+    def __init__(self, uuid_eddsa: UUID, uuid_ecdsa: UUID or None) -> None:
         super().__init__()
-        self.__ks = key_store
-        if TEST_KEYS and TEST_UUID:
-            try:
-                self.__ks.insert_ed25519_keypair(UUID(hex=TEST_UUID),
-                                                 ed25519.VerifyingKey(TEST_KEYS[64:].encode(), encoding='hex'),
-                                                 ed25519.SigningKey(TEST_KEYS.encode(), encoding='hex'))
-            except Exception as e:
-                logger.error(e)
-                pass
+        self.__vk_server = ed25519.VerifyingKey(SERVER_EDDSA_KEY, encoding='hex')
+        self.__vk[uuid_eddsa] = ed25519.VerifyingKey(TEST_KEY_EDDSA[64:].encode(), encoding='hex')
+        self.__sk[uuid_eddsa] = ed25519.SigningKey(TEST_EDDSA_KEY.encode(), encoding='hex')
+        self.__vk[uuid_ecdsa] = ecdsa.VerifyingKey.from_string(TEST_ECDSA_KEY[])
 
     def _sign(self, uuid: UUID, message: bytes) -> bytes:
-        return self.__ks.find_signing_key(uuid).sign(message)
+        return self.__sk[uuid].sign(message)
 
     def _verify(self, uuid: UUID, message: bytes, signature: bytes):
-        return self.__ks.find_verifying_key(uuid).verify(signature, message)
+        return self.__vk_server.verify(signature, message)
 
+    def get_certificate(self, uuid: UUID) -> dict or None:
+        if not uuid in self.__vk:
+            return None
+
+        vk = self.__vk[uuid]
+        timestamp = int(datetime.utcnow().timestamp())
+        created = datetime.fromtimestamp(timestamp)
+        not_before = datetime.fromtimestamp(timestamp)
+        # TODO fix handling of key validity
+        not_after = created + timedelta(days=365)
+        return {
+            "algorithm": 'ECC_ED25519',
+            "created": int(created.timestamp()),
+            "hwDeviceId": uuid.bytes,
+            "pubKey": vk.to_bytes(),
+            "pubKeyId": vk.to_bytes(),
+            "validNotAfter": int(not_after.timestamp()),
+            "validNotBefore": int(not_before.timestamp())
+        }
 
 # test UUID
 randomTestUUID = None
@@ -123,31 +124,15 @@ logger.info("** UUID (ECDSA)  : {}".format(testDeviceUUID['ECDSA']))
 
 c8y_client = c8y_client.client(testDeviceUUID['Ed25519'], C8Y_CLIENT_AUTH)
 
-# temporary key store with fixed test-key
-keystore = ubirch.KeyStore("service-check.jks", 'service-check')
-try:
-    keystore.find_signing_key(testDeviceUUID['Ed25519'])
-    keystore.create_ed25519_keypair(testDeviceUUID['Ed25519'])
-except:
-    pass
-
 api = API(auth=os.getenv("UBIRCH_AUTH"), env='dev', debug=True)
-proto = Proto(keystore)
-# proto.check_key(testDeviceUUID['Ed25519'])
-
-if not keystore.exists_signing_key(testDeviceUUID['Ed25519']):
-    keystore.create_ed25519_keypair(testDeviceUUID['Ed25519'])
-
-
-sk = keystore.find_signing_key(testDeviceUUID['Ed25519'])
-vk = keystore.find_verifying_key(testDeviceUUID['Ed25519'])
+proto = Proto(testDeviceUUID['Ed25519'], testDeviceUUID['ECDSA'])
 
 MESSAGES = []
 
 msg = proto.message_signed(testDeviceUUID['Ed25519'], UBIRCH_PROTOCOL_TYPE_REG,
-                           keystore.get_certificate(testDeviceUUID['Ed25519']))
+                           proto.get_certificate(testDeviceUUID['Ed25519']))
 if not api.is_identity_registered(testDeviceUUID['Ed25519']):
-    pubKeyInfo = keystore.get_certificate(testDeviceUUID['Ed25519'])
+    pubKeyInfo = proto.get_certificate(testDeviceUUID['Ed25519'])
     # create a json key registration request
     pubKeyInfo['hwDeviceId'] = str(testDeviceUUID['Ed25519'])
     pubKeyInfo['pubKey'] = base64.b64encode(pubKeyInfo['pubKey']).decode()
@@ -165,7 +150,7 @@ if not api.is_identity_registered(testDeviceUUID['Ed25519']):
 c8y_client.publish("s/us", f"110,{testDeviceUUID['Ed25519']}, ,0.0.2")
 
 # send signed messages
-for n in range(1, 10):
+for n in range(1, 2):
     timestamp = datetime.utcnow()
     message = "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat())
 
@@ -174,13 +159,13 @@ for n in range(1, 10):
     MESSAGES.append(msg)
     time.sleep(1)
 # send chained messages
-for n in range(6, 11):
-    timestamp = datetime.utcnow()
-    message = "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat())
-    c8y_client.publish("s/us", message)
-    msg = proto.message_chained(testDeviceUUID['Ed25519'], 0x00, hashlib.sha512(message.encode()).digest())
-    MESSAGES.append(msg)
-    time.sleep(1)
+# for n in range(6, 11):
+#     timestamp = datetime.utcnow()
+#     message = "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat())
+#     c8y_client.publish("s/us", message)
+#     msg = proto.message_chained(testDeviceUUID['Ed25519'], 0x00, hashlib.sha512(message.encode()).digest())
+#     MESSAGES.append(msg)
+#     time.sleep(1)
 
 ERRORS = 0
 # send out prepared messages
@@ -191,6 +176,7 @@ for n, msg in enumerate(MESSAGES):
             logger.info("OK  {:02d} {}".format(n, repr(proto.message_verify(r.content))))
         except Exception as e:
             logger.error("ERR #{:03d} verification failed: {}".format(n, binascii.hexlify(r.content).decode()))
+            logger.error("ERR ===> {}".format(repr(r.content)))
     else:
         logger.error("ERR #{:03d} {}".format(n, binascii.hexlify(msg).decode()))
         logger.error("HTTP {:03d} {}".format(r.status_code, r.content))
