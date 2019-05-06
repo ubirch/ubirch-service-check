@@ -131,7 +131,7 @@ try:
 except:
     pass
 
-api = API(auth=os.getenv("UBIRCH_AUTH"), env='dev', debug=True)
+api = API(auth=os.getenv("UBIRCH_AUTH"), env=os.getenv("UBIRCH_ENV", "dev"), debug=True)
 proto = Proto(keystore)
 # proto.check_key(testDeviceUUID['Ed25519'])
 
