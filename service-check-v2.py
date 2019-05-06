@@ -185,7 +185,7 @@ for n in range(6, 11):
 ERRORS = 0
 # send out prepared messages
 for n, msg in enumerate(MESSAGES):
-    r = requests.post("https://niomon.dev.ubirch.com/", data=msg, auth=tuple(c8y_client.auth.split(":")))
+    r = requests.post("https://niomon.{}.ubirch.com/".format(os.getenv("UBIRCH_ENV", "dev")), data=msg, auth=tuple(c8y_client.auth.split(":")))
     if r.status_code == requests.codes.OK:
         try:
             logger.info("OK  {:02d} {}".format(n, repr(proto.message_verify(r.content))))
