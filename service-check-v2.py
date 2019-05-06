@@ -58,18 +58,23 @@ logger.debug("TEST_KEY_EDDSA  = '{}'".format(TEST_KEY_EDDSA))
 logger.debug("TEST_KEY_ECDSA  = '{}'".format(TEST_KEY_ECDSA))
 logger.debug("C8Y_CLIENT_AUTH = '{}'".format(C8Y_CLIENT_AUTH))
 
-SERVER_EDDSA_KEY = "a2403b92bc9add365b3cd12ff120d020647f84ea6983f98bc4c87e0f4be8cd66"
 
 class Proto(ubirch.Protocol, ABC):
+    SERVER_EDDSA_KEY = "a2403b92bc9add365b3cd12ff120d020647f84ea6983f98bc4c87e0f4be8cd66"
+
     __vk = {}
     __sk = {}
 
-    def __init__(self, uuid_eddsa: UUID, uuid_ecdsa: UUID or None) -> None:
+    def __init__(self, uuid_eddsa: UUID,key_eddsa: str, uuid_ecdsa: UUID, key_ecdsa: str) -> None:
         super().__init__()
-        self.__vk_server = ed25519.VerifyingKey(SERVER_EDDSA_KEY, encoding='hex')
-        self.__vk[uuid_eddsa] = ed25519.VerifyingKey(TEST_KEY_EDDSA[64:].encode(), encoding='hex')
-        self.__sk[uuid_eddsa] = ed25519.SigningKey(TEST_EDDSA_KEY.encode(), encoding='hex')
-        self.__vk[uuid_ecdsa] = ecdsa.VerifyingKey.from_string(TEST_ECDSA_KEY[])
+        self.__vk_server = ed25519.VerifyingKey(self.SERVER_EDDSA_KEY, encoding='hex')
+        self.__sk[uuid_eddsa] = ed25519.SigningKey(key_eddsa.encode(), encoding='hex')
+        self.__vk[uuid_eddsa] = self.__sk[uuid_eddsa].get_verifying_key()
+        if uuid_ecdsa and key_ecdsa:
+            self.__sk[uuid_ecdsa] = ecdsa.SigningKey.from_string(key_ecdsa.encode(),
+                                                                   curve=ecdsa.curves.SECP256k1,
+                                                                   hashfunc=hashlib.sha256)
+            self.__vk[uuid_ecdsa] = self.__sk[uuid_ecdsa].get_verifying_key()
 
     def _sign(self, uuid: UUID, message: bytes) -> bytes:
         return self.__sk[uuid].sign(message)
@@ -170,7 +175,7 @@ for n in range(1, 2):
 ERRORS = 0
 # send out prepared messages
 for n, msg in enumerate(MESSAGES):
-    r = requests.post("https://niomon.dev.ubirch.com/", data=msg, auth=tuple(c8y_client.auth.split(":")))
+    r = requests.post("https://niomon.{}.ubirch.com/".format(), data=msg, auth=tuple(c8y_client.auth.split(":")))
     if r.status_code == requests.codes.OK:
         try:
             logger.info("OK  {:02d} {}".format(n, repr(proto.message_verify(r.content))))
