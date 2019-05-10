@@ -95,9 +95,9 @@ class Proto(ubirch.Protocol, ABC):
         return self.__ks.find_signing_key(uuid).sign(message)
 
     def _verify(self, uuid: UUID, message: bytes, signature: bytes):
-        if self.__ks.exists_signing_key(uuid):
+        try:
             return self.__ks.find_verifying_key(uuid).verify(signature, message)
-        else:
+        except:
             return self.__server_key.verify(signature, message)
 
 
