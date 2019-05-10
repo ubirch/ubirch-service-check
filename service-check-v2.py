@@ -192,7 +192,11 @@ ERRORS = 0
 for n, msg in enumerate(MESSAGES):
     r = requests.post("https://niomon.{}.ubirch.com/".format(os.getenv("UBIRCH_ENV", "dev")), data=msg, auth=tuple(c8y_client.auth.split(":")))
     if r.status_code == requests.codes.OK:
-        logger.info("OK  {:02d} {}".format(n, repr(proto.message_verify(r.content))))
+        try:
+            logger.info("OK  {:02d} {}".format(n, repr(proto.message_verify(r.content))))
+        except Exception as e:
+            logger.error("ERR #{:03d} verification failed: {}".format(n, binascii.hexlify(r.content).decode()))
+            ERRORS += 1
     else:
         logger.error("ERR #{:03d} {}".format(n, binascii.hexlify(msg).decode()))
         logger.error("HTTP {:03d} {}".format(r.status_code, r.content))
