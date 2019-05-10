@@ -54,6 +54,7 @@ logger.debug("NEOJ4_AUTH      = '{}'".format(NEO4J_AUTH))
 logger.debug("TEST_UUID       = '{}'".format(TEST_UUID))
 logger.debug("TEST_KEYS       = '{}'".format(TEST_KEYS))
 logger.debug("C8Y_CLIENT_AUTH = '{}'".format(C8Y_CLIENT_AUTH))
+SERVER_EDDSA_KEY = "a2403b92bc9add365b3cd12ff120d020647f84ea6983f98bc4c87e0f4be8cd66"
 
 
 class Proto(ubirch.Protocol, ABC):
@@ -80,6 +81,7 @@ class Proto(ubirch.Protocol, ABC):
     def __init__(self, key_store: ubirch.KeyStore) -> None:
         super().__init__()
         self.__ks = key_store
+        self.__server_key = ed25519.VerifyingKey(SERVER_EDDSA_KEY, encoding='hex')
         if TEST_KEYS and TEST_UUID:
             try:
                 self.__ks.insert_ed25519_keypair(UUID(hex=TEST_UUID),
@@ -93,7 +95,10 @@ class Proto(ubirch.Protocol, ABC):
         return self.__ks.find_signing_key(uuid).sign(message)
 
     def _verify(self, uuid: UUID, message: bytes, signature: bytes):
-        return self.__ks.find_verifying_key(uuid).verify(signature, message)
+        if self.__ks.exists_signing_key(uuid):
+            return self.__ks.find_verifying_key(uuid).verify(signature, message)
+        else:
+            return self.__server_key.verify(signature, message)
 
 
 # test UUID
