@@ -173,6 +173,7 @@ c8y_client.publish("s/us", f"110,{testDeviceUUID['Ed25519']}, ,0.0.2")
 for n in range(1, 10):
     timestamp = datetime.utcnow()
     message = "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat())
+    logger.info("HASH: {}".format(binascii.b2a_base64(hashlib.sha512(message.encode()).digest())))
 
     c8y_client.publish("s/us", "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat()))
     msg = proto.message_signed(testDeviceUUID['Ed25519'], 0x00, hashlib.sha512(message.encode()).digest())
@@ -182,6 +183,8 @@ for n in range(1, 10):
 for n in range(6, 11):
     timestamp = datetime.utcnow()
     message = "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat())
+    logger.info("HASH: {}".format(binascii.b2a_base64(hashlib.sha512(message.encode()).digest())))
+
     c8y_client.publish("s/us", message)
     msg = proto.message_chained(testDeviceUUID['Ed25519'], 0x00, hashlib.sha512(message.encode()).digest())
     MESSAGES.append(msg)
