@@ -67,13 +67,13 @@ class C8yBootstrapClient:
         return self.authorization
 
 class C8yClient:
-    def __init__(self, client: mqtt.Client, tenant: str, auth: str):
+    def __init__(self, mqtt_server: mqtt.Client, tenant: str, auth: str):
         (username, password) = auth.split(":")
 
         self.receivedMessages = []
 
         self.tenant = tenant
-        self.client = client
+        self.client = mqtt_server
         self.client.enable_logger(logger)
         self.auth = auth
         self.client.username_pw_set("{}/{}".format(tenant, username), password)

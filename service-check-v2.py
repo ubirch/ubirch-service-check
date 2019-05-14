@@ -50,7 +50,7 @@ TEST_KEY_EDDSA = os.getenv("TEST_KEY_EDDSA")
 TEST_KEY_ECDSA = os.getenv("TEST_KEY_ECDSA")
 NEO4J_URL = os.getenv("NEO4J_URL")
 NEO4J_AUTH = os.getenv("NEO4J_AUTH")
-C8Y_CLIENT_AUTH = os.getenv("C8Y_CLIENT_AUTH")
+C8Y_AUTH = os.getenv("C8Y_AUTH")
 
 
 logger.debug(f"UBIRCH_ENV      = '{UBIRCH_ENV}'")
@@ -60,7 +60,7 @@ logger.debug(f"TEST_UUID       = '{TEST_UUID}'")
 logger.debug(f"SERVER_PUBKEY   = '{SERVER_PUBKEY}'")
 logger.debug(f"TEST_KEY_EDDSA  = '{TEST_KEY_EDDSA}'")
 logger.debug(f"TEST_KEY_ECDSA  = '{TEST_KEY_ECDSA}'")
-logger.debug(f"C8Y_CLIENT_AUTH = '{C8Y_CLIENT_AUTH}'")
+logger.debug(f"C8Y_AUTH        = '{C8Y_AUTH}'")
 
 
 class Proto(ubirch.Protocol, ABC):
@@ -118,8 +118,6 @@ class Proto(ubirch.Protocol, ABC):
 DEVICE_UUID = UUID(hex="FFFF160c-6117-5b89-ac98-15aeb52655e0")
 logger.info(f"** UUID: {DEVICE_UUID}")
 
-# c8y_client = c8y_client.client(DEVICE_UUID, C8Y_CLIENT_AUTH)
-
 api = API(auth=os.getenv("UBIRCH_AUTH"), env='dev', debug=True)
 protocol = Proto(DEVICE_UUID)
 
@@ -153,17 +151,16 @@ def run_tests(api, proto, uuid, key, type) -> int:
         logger.info(pubKeyRegMsgJson)
         logger.info(api.register_identity(pubKeyRegMsgJson).content.decode())
 
-    return 0
-
     # update hardware id of the device, so the authentication works
-    c8y_client.publish("s/us", f"110,{uuid},SERVICE CHECK,0.0.2")
+    c8y = c8y_client.client(uuid)
+    c8y.publish("s/us", f"110,{uuid},SERVICE CHECK,0.0.2")
 
     # send signed messages
     for n in range(1, 2):
         timestamp = datetime.utcnow()
         message = "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat())
 
-        c8y_client.publish("s/us", "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat()))
+        c8y.publish("s/us", "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat()))
         msg = proto.message_signed(uuid, 0x00, hashlib.sha512(message.encode()).digest())
         MESSAGES.append(msg)
         time.sleep(1)
@@ -171,7 +168,7 @@ def run_tests(api, proto, uuid, key, type) -> int:
     # for n in range(6, 11):
     #     timestamp = datetime.utcnow()
     #     message = "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat())
-    #     c8y_client.publish("s/us", message)
+    #     c8y.publish("s/us", message)
     #     msg = proto.message_chained(testDeviceUUID['Ed25519'], 0x00, hashlib.sha512(message.encode()).digest())
     #     MESSAGES.append(msg)
     #     time.sleep(1)
@@ -179,7 +176,7 @@ def run_tests(api, proto, uuid, key, type) -> int:
     ERRORS = 0
     # send out prepared messages
     for n, msg in enumerate(MESSAGES):
-        r = requests.post(f"https://niomon.{UBIRCH_ENV}.ubirch.com/", data=msg, auth=tuple(c8y_client.auth.split(":")))
+        r = requests.post(f"https://niomon.{UBIRCH_ENV}.ubirch.com/", data=msg, auth=tuple(c8y.auth.split(":")))
         if r.status_code == requests.codes.OK:
             try:
                 logger.info(f"OK  {n:02d} {repr(proto.message_verify(r.content))}")
