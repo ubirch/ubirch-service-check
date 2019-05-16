@@ -134,9 +134,9 @@ def client(uuid: UUID, injected_auth=None):
         else:
             auth = os.getenv("C8Y_AUTH", "")
             bootstrap_client = C8yBootstrapClient(mqtt_client, auth)
-            auth = bootstrap_client.get_authorization()
+            auth = bootstrap_client.get_authorization().decode()
             with open(auth_file, "wb") as f:
-                f.write(auth)
+                f.write(auth.encode())
 
     (tenant, username, password) = auth[3:].split(",")
     return C8yClient(mqtt_client, tenant, username+":"+password)

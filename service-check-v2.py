@@ -19,6 +19,7 @@
 import base64
 import binascii
 import hashlib
+import http
 import json
 import logging
 import os
@@ -43,24 +44,28 @@ logger = logging.getLogger()
 
 ERRORS = 0
 
-UBIRCH_ENV = os.getenv("UBIRCH_ENV")
+UBIRCH_ENV = os.getenv("UBIRCH_ENV", "dev")
+UBIRCH_AUTH = os.getenv("UBIRCH_AUTH")
 SERVER_PUBKEY = os.getenv("SERVER_PUBKEY")
 TEST_UUID = os.getenv("TEST_UUID")
 TEST_KEY_EDDSA = os.getenv("TEST_KEY_EDDSA")
 TEST_KEY_ECDSA = os.getenv("TEST_KEY_ECDSA")
 NEO4J_URL = os.getenv("NEO4J_URL")
 NEO4J_AUTH = os.getenv("NEO4J_AUTH")
-C8Y_AUTH = os.getenv("C8Y_AUTH")
+C8Y_AUTH_EDDSA = os.getenv("C8Y_AUTH_EDDSA")
+C8Y_AUTH_ECDSA = os.getenv("C8Y_AUTH_EDDSA")
 
 
 logger.debug(f"UBIRCH_ENV      = '{UBIRCH_ENV}'")
+logger.debug(f"UBIRCH_AUTH     = '{UBIRCH_AUTH}")
 logger.debug(f"NEOJ4_URL       = '{NEO4J_URL}'")
 logger.debug(f"NEOJ4_AUTH      = '{NEO4J_AUTH}'")
 logger.debug(f"TEST_UUID       = '{TEST_UUID}'")
 logger.debug(f"SERVER_PUBKEY   = '{SERVER_PUBKEY}'")
 logger.debug(f"TEST_KEY_EDDSA  = '{TEST_KEY_EDDSA}'")
 logger.debug(f"TEST_KEY_ECDSA  = '{TEST_KEY_ECDSA}'")
-logger.debug(f"C8Y_AUTH        = '{C8Y_AUTH}'")
+logger.debug(f"C8Y_AUTH_EDDSA  = '{C8Y_AUTH_EDDSA}'")
+logger.debug(f"C8Y_AUTH_ECDSA  = '{C8Y_AUTH_ECDSA}'")
 
 
 class Proto(ubirch.Protocol, ABC):
@@ -114,16 +119,10 @@ class Proto(ubirch.Protocol, ABC):
             "validNotBefore": int(not_before.timestamp())
         }
 
-# Device Test UUID
-DEVICE_UUID = UUID(hex="FFFF160c-6117-5b89-ac98-15aeb52655e0")
-logger.info(f"** UUID: {DEVICE_UUID}")
 
-api = API(auth=os.getenv("UBIRCH_AUTH"), env='dev', debug=True)
-protocol = Proto(DEVICE_UUID)
+def run_tests(api, proto, uuid, c8y_auth, key, type) -> int:
+    MESSAGES = []
 
-MESSAGES = []
-
-def run_tests(api, proto, uuid, key, type) -> int:
     proto.update_key(uuid, key, type)
 
     # register the key
@@ -152,7 +151,7 @@ def run_tests(api, proto, uuid, key, type) -> int:
         logger.info(api.register_identity(pubKeyRegMsgJson).content.decode())
 
     # update hardware id of the device, so the authentication works
-    c8y = c8y_client.client(uuid)
+    c8y = c8y_client.client(uuid, c8y_auth)
     c8y.publish("s/us", f"110,{uuid},SERVICE CHECK,0.0.2")
 
     # send signed messages
@@ -173,10 +172,14 @@ def run_tests(api, proto, uuid, key, type) -> int:
     #     MESSAGES.append(msg)
     #     time.sleep(1)
 
+    http.client.HTTPConnection.debuglevel = 1
+
     ERRORS = 0
     # send out prepared messages
     for n, msg in enumerate(MESSAGES):
-        r = requests.post(f"https://niomon.{UBIRCH_ENV}.ubirch.com/", data=msg, auth=tuple(c8y.auth.split(":")))
+        r = requests.post(f"https://niomon.{UBIRCH_ENV}.ubirch.com/",
+                          headers={"X-Niomon-Purge-Caches": "true"},
+                          data=msg, auth=tuple(c8y.auth.split(":")))
         if r.status_code == requests.codes.OK:
             try:
                 logger.info(f"OK  {n:02d} {repr(proto.message_verify(r.content))}")
@@ -201,12 +204,19 @@ def run_tests(api, proto, uuid, key, type) -> int:
     return ERRORS
 
 
-# errors = run_tests(api, protocol, DEVICE_UUID, TEST_KEY_EDDSA, "ECC_ED25519")
+# Device Test UUID
+DEVICE_UUID = UUID(hex="FFFF160c-6117-5b89-ac98-15aeb52655e0")
+logger.info(f"** UUID: {DEVICE_UUID}")
+
+api = API(auth=UBIRCH_AUTH, env=UBIRCH_ENV, debug=(LOGLEVEL == 'DEBUG'))
+protocol = Proto(DEVICE_UUID)
+
+# errors = run_tests(api, protocol, DEVICE_UUID, C8Y_AUTH_EDDSA, TEST_KEY_EDDSA, "ECC_ED25519")
 # if errors > 0:
 #     logger.error(f"EDDSA ERRORS: {errors}")
 #     exit(-1)
 
-errors = run_tests(api, protocol, DEVICE_UUID, TEST_KEY_ECDSA, "ecdsa-p256v1")
+errors = run_tests(api, protocol, DEVICE_UUID, C8Y_AUTH_EDDSA, TEST_KEY_ECDSA, "ecdsa-p256v1")
 if errors > 0:
     logger.error(f"EDDSA ERRORS: {errors}")
     exit(-1)
