@@ -56,6 +56,9 @@ logger.debug("TEST_KEYS       = '{}'".format(TEST_KEYS))
 logger.debug("C8Y_CLIENT_AUTH = '{}'".format(C8Y_CLIENT_AUTH))
 SERVER_EDDSA_KEY = "a2403b92bc9add365b3cd12ff120d020647f84ea6983f98bc4c87e0f4be8cd66"
 
+ubirchEnv = os.getenv("UBIRCH_ENV", "dev")
+
+logger.info("current env: {}".format(ubirchEnv))
 
 class Proto(ubirch.Protocol, ABC):
 
@@ -170,30 +173,37 @@ if not api.is_identity_registered(testDeviceUUID['Ed25519']):
 c8y_client.publish("s/us", f"110,{testDeviceUUID['Ed25519']}, ,0.0.2")
 
 # send signed messages
-for n in range(1, 10):
-    timestamp = datetime.utcnow()
-    message = "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat())
-    logger.info("HASH: {}".format(binascii.b2a_base64(hashlib.sha512(message.encode()).digest()).decode().replace('\n', '')))
+# for n in range(1, 100):
+#     timestamp = datetime.utcnow()
+#     message = "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat())
+#     logger.info("HASH: {}".format(binascii.b2a_base64(hashlib.sha512(message.encode()).digest()).decode().replace('\n', '')))
+#
+#     c8y_client.publish("s/us", "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat()))
+#     msg = proto.message_signed(testDeviceUUID['Ed25519'], 0x00, hashlib.sha512(message.encode()).digest())
+#     MESSAGES.append(msg)
+#     time.sleep(0.1)
 
-    c8y_client.publish("s/us", "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat()))
-    msg = proto.message_signed(testDeviceUUID['Ed25519'], 0x00, hashlib.sha512(message.encode()).digest())
-    MESSAGES.append(msg)
-    time.sleep(1)
+# message = '{"created":"21.04.2018","name":"Max Mustermann","workshop":"Workshop IoT"}'
+# logger.info("Cert HASH: {}".format(binascii.b2a_base64(hashlib.sha512(message.encode(encoding='UTF-8')).digest()).decode().replace('\n', '')))
+# msg = proto.message_signed(testDeviceUUID['Ed25519'], 0x00, hashlib.sha512(message.encode()).digest())
+# MESSAGES.append(msg)
+
 # send chained messages
-for n in range(6, 11):
+for n in range(1, 5 + 1):
     timestamp = datetime.utcnow()
     message = "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat())
     logger.info("HASH: {}".format(binascii.b2a_base64(hashlib.sha512(message.encode()).digest()).decode().replace('\n', '')))
-
     c8y_client.publish("s/us", message)
     msg = proto.message_chained(testDeviceUUID['Ed25519'], 0x00, hashlib.sha512(message.encode()).digest())
     MESSAGES.append(msg)
-    time.sleep(1)
+    time.sleep(0.3)
 
 ERRORS = 0
 # send out prepared messages
 for n, msg in enumerate(MESSAGES):
-    r = requests.post("https://niomon.{}.ubirch.com/".format(os.getenv("UBIRCH_ENV", "dev")), data=msg, auth=tuple(c8y_client.auth.split(":")))
+    url = "https://niomon.{}.ubirch.com/".format(ubirchEnv)
+    logger.debug("{}".format(url))
+    r = requests.post(url, data=msg, auth=tuple(c8y_client.auth.split(":")))
     if r.status_code == requests.codes.OK:
         try:
             logger.info("OK  {:02d} {}".format(n, repr(proto.message_verify(r.content))))
