@@ -19,22 +19,20 @@
 import base64
 import binascii
 import hashlib
-import http
 import json
 import logging
 import os
-import secrets
 import time
 from abc import ABC
 from datetime import datetime, timedelta
-from uuid import UUID, uuid5
+from uuid import UUID
 
 import ecdsa as ecdsa
 import ed25519
 import requests
 import ubirch
+import msgpack
 from ubirch import API
-from ubirch.ubirch_protocol import UBIRCH_PROTOCOL_TYPE_REG
 
 import c8y_client
 
@@ -88,11 +86,17 @@ class Proto(ubirch.Protocol, ABC):
         self.type = type
         self.uuid = uuid
 
+    def _hash(self, message: bytes) -> bytes:
+        if self.type == 'ECC_ED25519':
+            return super(self)._hash(message)
+        else:
+            return message
+
     def _sign(self, uuid: UUID, message: bytes) -> bytes:
         return self.sk.sign(message)
 
     def _verify(self, uuid: UUID, message: bytes, signature: bytes):
-        return self.__vk_server.verify(signature, message)
+        return self.__vk_server.verify(signature, hashlib.sha512(message).digest())
 
     def get_vk(self) -> bytes:
         if self.type == "ECC_ED25519":
@@ -172,7 +176,7 @@ def run_tests(api, proto, uuid, c8y_auth, key, type) -> int:
     #     MESSAGES.append(msg)
     #     time.sleep(1)
 
-    http.client.HTTPConnection.debuglevel = 1
+    # http.client.HTTPConnection.debuglevel = 1
 
     ERRORS = 0
     # send out prepared messages
@@ -188,7 +192,12 @@ def run_tests(api, proto, uuid, c8y_auth, key, type) -> int:
                 logger.error(f"ERR ===> {repr(r.content)}")
         else:
             logger.error(f"ERR #{n:03d} {binascii.hexlify(msg).decode()}")
-            logger.error(f"HTTP {r.status_code:03d} {r.content}")
+            logger.error(f"HTTP {r.status_code:03d} {binascii.hexlify(r.content).decode()}")
+            try:
+                logger.error(f"RSP #{n:03d} {proto.message_verify(r.content)}")
+            except Exception as e:
+                logger.error(f"can't decode and verify response: {e.args}")
+                pass
             ERRORS += 1
 
     r = api.deregister_identity(str.encode(json.dumps({
@@ -218,5 +227,5 @@ protocol = Proto(DEVICE_UUID)
 
 errors = run_tests(api, protocol, DEVICE_UUID, C8Y_AUTH_EDDSA, TEST_KEY_ECDSA, "ecdsa-p256v1")
 if errors > 0:
-    logger.error(f"EDDSA ERRORS: {errors}")
+    logger.error(f"ECDSA ERRORS: {errors}")
     exit(-1)
