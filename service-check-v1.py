@@ -100,7 +100,7 @@ def nagios(client, env, service, code, message="OK"):
     if code == NAGIOS_OK:
         logger.info("{}.ubirch.com {} {}".format(env, service, message))
     elif code == NAGIOS_WARNING:
-        logger.warning("{}.ubirch.com {} {}".format( env, service, message))
+        logger.warning("{}.ubirch.com {} {}".format(env, service, message))
     else:
         logger.error("{}.ubirch.com {} {}".format(env, service, message))
 
@@ -304,11 +304,11 @@ if not connected_event.wait(timeout=30):
     exit(-1)
 
 # send signed messages
-for n in range(1, 6):
+for n in range(1, 4):
     msg = proto.message_signed(uuid, 0x53, {'ts': int(datetime.utcnow().timestamp()), 'v': n})
     MESSAGES_SENT.append(msg)
 # send chained messages
-for n in range(6, 11):
+for n in range(4, 8):
     msg = proto.message_chained(uuid, 0x53, {'ts': int(datetime.utcnow().timestamp()), 'v': n})
     MESSAGES_SENT.append(msg)
 
@@ -322,7 +322,7 @@ for n, msg in enumerate(MESSAGES_SENT.copy()):
         ERRORS += 1
         ERROR_RESULTS.append("message(#{}, {}): {}".format(n, r.status_code, bytes.decode(r.content)))
         logger.error("{}.service.{}.message.{}.send: FAILED: {} {}"
-                    .format(UBIRCH_ENV, AVATAR_SERVICE, n, r.status_code, bytes.decode(r.content)))
+                     .format(UBIRCH_ENV, AVATAR_SERVICE, n, r.status_code, bytes.decode(r.content)))
 
 finished_event.wait(timeout=30)
 if len(MESSAGES_SENT) == 0:
@@ -330,7 +330,7 @@ if len(MESSAGES_SENT) == 0:
 else:
     ERRORS += 1
     logger.error("{}.service.{}.mqtt: FAILED: {} messages missing"
-                .format(UBIRCH_ENV, AVATAR_SERVICE, len(MESSAGES_SENT)))
+                 .format(UBIRCH_ENV, AVATAR_SERVICE, len(MESSAGES_SENT)))
 client.disconnect()
 
 # delete the device
