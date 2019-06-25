@@ -23,7 +23,7 @@ import json
 import logging
 import os
 import random
-import time
+import uuid
 from abc import ABC
 from datetime import datetime, timedelta
 from uuid import UUID
@@ -46,7 +46,7 @@ ICINGA_URL = os.getenv("ICINGA_URL")
 ICINGA_AUTH = os.getenv("ICINGA_AUTH")
 UBIRCH_ENV = os.getenv("UBIRCH_ENV", "dev")
 UBIRCH_AUTH = os.getenv("UBIRCH_AUTH")
-TEST_UUID = os.getenv("TEST_UUID")
+TEST_UUID = os.getenv("TEST_UUID_EDDSA")
 TEST_KEY_EDDSA = os.getenv("TEST_KEY_EDDSA")
 TEST_KEY_ECDSA = os.getenv("TEST_KEY_ECDSA")
 SRVR_KEY_EDDSA = os.getenv("SRVR_KEY_EDDSA", "a2403b92bc9add365b3cd12ff120d020647f84ea6983f98bc4c87e0f4be8cd66")
@@ -213,7 +213,7 @@ def run_tests(api, proto, uuid, auth, key, type) -> int:
     # send out prepared messages
     for n, msg in enumerate(MESSAGES):
         r = requests.post(f"https://niomon.{UBIRCH_ENV}.ubirch.com/",
-                          # headers={"X-Niomon-Purge-Caches": "true"},
+                          #headers={"X-Niomon-Purge-Caches": "true"},
                           data=msg[0], auth=tuple(auth.split(":")))
         if r.status_code == requests.codes.OK:
             try:
@@ -238,11 +238,11 @@ def run_tests(api, proto, uuid, auth, key, type) -> int:
             if json.loads(r.content)["seal"] == base64.b64encode(msg[0]).decode():
                 logger.info(f"=== OK  #{n:03d} verification matches")
             else:
-                logger.error(f"!!! ERR #{n:03d} verification failed")
+                logger.error(f"!!! ERR #{n:03d} verification faileds")
                 ERRORS += 1
         else:
-            logger.error(f"!!! ERR #{n:03d} {r.status_code} {r.content.decode()}")
-            ERRORS += 1
+            logger.error(f"!!! ERR #{n:03d} verifications failed: {r.status_code} {r.content.decode()}")
+            # ERRORS += 1
 
     r = api.deregister_identity(str.encode(json.dumps({
         "publicKey": bytes.decode(base64.b64encode(proto.get_vk())),
@@ -260,7 +260,7 @@ def run_tests(api, proto, uuid, auth, key, type) -> int:
 
 # Device Test UUID
 DEVICE_UUID = UUID(hex="FFFF160c-6117-5b89-ac98-15aeb52655e0")
-logger.info(f"** UUID: {DEVICE_UUID}")
+logger.info(f"** BASE UUID: {DEVICE_UUID}")
 
 api = API(auth=UBIRCH_AUTH, env=UBIRCH_ENV, debug=(LOGLEVEL == 'DEBUG'))
 protocol = Proto(DEVICE_UUID)
@@ -268,7 +268,7 @@ protocol = Proto(DEVICE_UUID)
 has_failed = False
 
 logger.info("== EDDSA ==================================================")
-errors = run_tests(api, protocol, DEVICE_UUID, UBIRCH_AUTH, TEST_KEY_EDDSA, "ECC_ED25519")
+errors = run_tests(api, protocol, uuid.uuid5(DEVICE_UUID, "ED25519"), UBIRCH_AUTH, TEST_KEY_EDDSA, "ECC_ED25519")
 if errors > 0:
     logger.error(f"EDDSA ERRORS: {errors}")
     nagios(None, UBIRCH_ENV, "ED25519", NAGIOS_ERROR, f"{errors} checks failed")
@@ -277,7 +277,7 @@ else:
     nagios(None, UBIRCH_ENV, "ED25519", NAGIOS_OK, f"all checks successful")
 
 logger.info("== ECDSA ==================================================")
-errors = run_tests(api, protocol, DEVICE_UUID, UBIRCH_AUTH, TEST_KEY_ECDSA, "ecdsa-p256v1")
+errors = run_tests(api, protocol, uuid.uuid5(DEVICE_UUID, "ECDSA"), UBIRCH_AUTH, TEST_KEY_ECDSA, "ecdsa-p256v1")
 if errors > 0:
     logger.error(f"ECDSA ERRORS: {errors}")
     nagios(None, UBIRCH_ENV, "ECDSA", NAGIOS_ERROR, f"{errors} checks failed")
