@@ -22,6 +22,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import time
 from abc import ABC
 from datetime import datetime, timedelta
@@ -200,20 +201,20 @@ def run_tests(api, proto, uuid, auth, key, type) -> int:
     # send 5 signed and 5 chained messages
     for n in range(1, 11):
         timestamp = datetime.utcnow()
-        message = "{},{}".format(n, timestamp.isoformat())
+        message = "{},{},{}".format(n, timestamp.isoformat(), random.random()*1e9)
+        digest = hashlib.sha512(message.encode()).digest()
         if n < 6:
-            msg = proto.message_signed(uuid, 0x00, hashlib.sha512(message.encode()).digest())
+            msg = proto.message_signed(uuid, 0x00, digest)
         else:
-            msg = proto.message_chained(uuid, 0x00, hashlib.sha512(message.encode()).digest())
-        MESSAGES.append(msg)
-        time.sleep(1)
+            msg = proto.message_chained(uuid, 0x00, digest)
+        MESSAGES.append([msg, digest])
 
     ERRORS = 0
     # send out prepared messages
     for n, msg in enumerate(MESSAGES):
         r = requests.post(f"https://niomon.{UBIRCH_ENV}.ubirch.com/",
-                          headers={"X-Niomon-Purge-Caches": "true"},
-                          data=msg, auth=tuple(auth.split(":")))
+                          # headers={"X-Niomon-Purge-Caches": "true"},
+                          data=msg[0], auth=tuple(auth.split(":")))
         if r.status_code == requests.codes.OK:
             try:
                 logger.info(f"=== OK  #{n:03d} {repr(proto.message_verify(r.content))}")
@@ -221,7 +222,7 @@ def run_tests(api, proto, uuid, auth, key, type) -> int:
                 logger.error(f"!!! ERR #{n:03d} verification failed: {binascii.hexlify(r.content).decode()}")
                 logger.error(f"!!! ERR ===> {repr(r.content)}")
         else:
-            logger.error(f"!!! ERR #{n:03d} {binascii.hexlify(msg).decode()}")
+            logger.error(f"!!! ERR #{n:03d} {binascii.hexlify(msg[0]).decode()}")
             logger.error(f"!!! HTTP {r.status_code:03d} {binascii.hexlify(r.content).decode()}")
             try:
                 logger.error(f"!!! RSP #{n:03d} {proto.message_verify(r.content)}")
@@ -229,6 +230,11 @@ def run_tests(api, proto, uuid, auth, key, type) -> int:
                 logger.error(f"!!! can't decode and verify response: {e.args}")
                 pass
             ERRORS += 1
+
+        r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/verify",
+                          headers={"Accept": "application/json", "Content-Type": "text/plain"},
+                          data=base64.b64encode(msg[1]))
+        logger.debug(r.content.decode())
 
     r = api.deregister_identity(str.encode(json.dumps({
         "publicKey": bytes.decode(base64.b64encode(proto.get_vk())),
