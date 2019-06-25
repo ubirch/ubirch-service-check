@@ -251,11 +251,14 @@ logger.info(f"** UUID: {DEVICE_UUID}")
 api = API(auth=UBIRCH_AUTH, env=UBIRCH_ENV, debug=(LOGLEVEL == 'DEBUG'))
 protocol = Proto(DEVICE_UUID)
 
+has_failed = False
+
 logger.info("== EDDSA ==================================================")
 errors = run_tests(api, protocol, DEVICE_UUID, UBIRCH_AUTH, TEST_KEY_EDDSA, "ECC_ED25519")
 if errors > 0:
     logger.error(f"EDDSA ERRORS: {errors}")
     nagios(None, UBIRCH_ENV, "ED25519", NAGIOS_ERROR, f"{errors} checks failed")
+    has_failed |= True
 else:
     nagios(None, UBIRCH_ENV, "ED25519", NAGIOS_OK, f"all checks successful")
 
@@ -264,5 +267,9 @@ errors = run_tests(api, protocol, DEVICE_UUID, UBIRCH_AUTH, TEST_KEY_ECDSA, "ecd
 if errors > 0:
     logger.error(f"ECDSA ERRORS: {errors}")
     nagios(None, UBIRCH_ENV, "ECDSA", NAGIOS_ERROR, f"{errors} checks failed")
+    has_failed |= True
 else:
     nagios(None, UBIRCH_ENV, "ECDSA", NAGIOS_OK, f"all checks successful")
+
+if has_failed:
+    exit(-1)
