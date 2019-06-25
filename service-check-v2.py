@@ -41,6 +41,8 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 ERRORS = 0
 
+ICINGA_URL = os.getenv("ICINGA_URL")
+ICINGA_AUTH = os.getenv("ICINGA_AUTH")
 UBIRCH_ENV = os.getenv("UBIRCH_ENV", "dev")
 UBIRCH_AUTH = os.getenv("UBIRCH_AUTH")
 TEST_UUID = os.getenv("TEST_UUID")
@@ -49,15 +51,52 @@ TEST_KEY_ECDSA = os.getenv("TEST_KEY_ECDSA")
 SRVR_KEY_EDDSA = os.getenv("SRVR_KEY_EDDSA", "a2403b92bc9add365b3cd12ff120d020647f84ea6983f98bc4c87e0f4be8cd66")
 SRVR_KEY_ECDSA = os.getenv("SRVR_KEY_ECDSA")
 
+logger.debug(f"ICINGA_URL      = '{ICINGA_URL}'")
+logger.debug(f"ICINGA_AUTH     = '{ICINGA_AUTH}'")
 logger.debug(f"UBIRCH_ENV      = '{UBIRCH_ENV}'")
-logger.debug(f"UBIRCH_AUTH     = '{UBIRCH_AUTH}")
+logger.debug(f"UBIRCH_AUTH     = '{UBIRCH_AUTH}'")
 logger.debug(f"TEST_UUID       = '{TEST_UUID}'")
 logger.debug(f"SRVR_KEY_EDDSA  = '{SRVR_KEY_EDDSA}'")
 logger.debug(f"SRVR_KEY_ECDSA  = '{SRVR_KEY_ECDSA}'")
 logger.debug(f"TEST_KEY_EDDSA  = '{TEST_KEY_EDDSA}'")
 logger.debug(f"TEST_KEY_ECDSA  = '{TEST_KEY_ECDSA}'")
 
+# == NAGIOS / ICINGA SETTINGS ==========================================================
+NAGIOS_OK = 0
+NAGIOS_WARNING = 1
+NAGIOS_ERROR = 2
+NAGIOS_UNKNOWN = 3
 
+
+def nagios(client, env, service, code, message="OK"):
+    if not client: client = "ubirch"
+    if not env: env = "local"
+    env = client + "." + env
+
+    data = {
+        "exit_status": code,
+        "plugin_output": message,
+        "check_source": env,
+        "ttl": 3600.0
+    }
+
+    if code == NAGIOS_OK:
+        logger.info("{}.ubirch.com {} {}".format(env, service, message))
+    elif code == NAGIOS_WARNING:
+        logger.warning("{}.ubirch.com {} {}".format( env, service, message))
+    else:
+        logger.error("{}.ubirch.com {} {}".format(env, service, message))
+
+    if ICINGA_URL and ICINGA_AUTH:
+        r = requests.post(ICINGA_URL + "?" + "service={}.ubirch.com!{}".format(env, service),
+                          json=data, headers={"Accept": "application/json"}, auth=tuple(ICINGA_AUTH.split(":")))
+        if r.status_code != 200:
+            logger.error("ERROR: {}: {}".format(r.status_code, bytes.decode(r.content)))
+        else:
+            logger.debug("{}: {}".format(r.status_code, bytes.decode(r.content)))
+
+
+# == ubirch protocol implementation =====================================================
 class Proto(ubirch.Protocol, ABC):
     SERVER_EDDSA_KEY = SRVR_KEY_EDDSA or None
     SERVER_ECDSA_KEY = SRVR_KEY_ECDSA or None
@@ -97,11 +136,11 @@ class Proto(ubirch.Protocol, ABC):
         return self.sk.sign(message)
 
     def _verify(self, uuid: UUID, message: bytes, signature: bytes):
-        # TODO fix this as soon as the server can create different signatures
-        if self.type == 'ECC_ED25519' or self.type == 'ecdsa-p256v1':
-            return self.__vk_eddsa.verify(signature, ubirch.Protocol._hash(self, message))
+        if self.type == 'ECC_ED25519':
+            return self.__vk_eddsa.verify(signature, message)
         else:
-            return self.__vk_ecdsa.verify(signature, message)
+            # TODO fix this as soon as the server can create different signatures
+            return self.__vk_eddsa.verify(signature, ubirch.Protocol._hash(self, message))
 
     def get_vk(self) -> bytes:
         if self.type == "ECC_ED25519":
@@ -177,7 +216,7 @@ def run_tests(api, proto, uuid, auth, key, type) -> int:
                           data=msg, auth=tuple(auth.split(":")))
         if r.status_code == requests.codes.OK:
             try:
-                logger.info(f"=== OK  {n:02d} {repr(proto.message_verify(r.content))}")
+                logger.info(f"=== OK  #{n:03d} {repr(proto.message_verify(r.content))}")
             except Exception as e:
                 logger.error(f"!!! ERR #{n:03d} verification failed: {binascii.hexlify(r.content).decode()}")
                 logger.error(f"!!! ERR ===> {repr(r.content)}")
@@ -212,14 +251,18 @@ logger.info(f"** UUID: {DEVICE_UUID}")
 api = API(auth=UBIRCH_AUTH, env=UBIRCH_ENV, debug=(LOGLEVEL == 'DEBUG'))
 protocol = Proto(DEVICE_UUID)
 
-# logger.info("== EDDSA ==================================================")
-# errors = run_tests(api, protocol, DEVICE_UUID, UBIRCH_AUTH, TEST_KEY_EDDSA, "ECC_ED25519")
-# if errors > 0:
-#     logger.error(f"EDDSA ERRORS: {errors}")
-#     exit(-1)
+logger.info("== EDDSA ==================================================")
+errors = run_tests(api, protocol, DEVICE_UUID, UBIRCH_AUTH, TEST_KEY_EDDSA, "ECC_ED25519")
+if errors > 0:
+    logger.error(f"EDDSA ERRORS: {errors}")
+    nagios(None, UBIRCH_ENV, "ED25519", NAGIOS_ERROR, f"{errors} checks failed")
+else:
+    nagios(None, UBIRCH_ENV, "ED25519", NAGIOS_OK, f"all checks successful")
 
 logger.info("== ECDSA ==================================================")
 errors = run_tests(api, protocol, DEVICE_UUID, UBIRCH_AUTH, TEST_KEY_ECDSA, "ecdsa-p256v1")
 if errors > 0:
     logger.error(f"ECDSA ERRORS: {errors}")
-    exit(-1)
+    nagios(None, UBIRCH_ENV, "ECDSA", NAGIOS_ERROR, f"{errors} checks failed")
+else:
+    nagios(None, UBIRCH_ENV, "ECDSA", NAGIOS_OK, f"all checks successful")
