@@ -234,7 +234,15 @@ def run_tests(api, proto, uuid, auth, key, type) -> int:
         r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/verify",
                           headers={"Accept": "application/json", "Content-Type": "text/plain"},
                           data=base64.b64encode(msg[1]))
-        logger.debug(r.content.decode())
+        if r.status_code == requests.codes.ok:
+            if json.loads(r.content)["seal"] == base64.b64encode(msg[0]).decode():
+                logger.info(f"=== OK  #{n:03d} verification matches")
+            else:
+                logger.error(f"!!! ERR #{n:03d} verification failed")
+                ERRORS += 1
+        else:
+            logger.error(f"!!! ERR #{n:03d} {r.status_code} {r.content.decode()}")
+            ERRORS += 1
 
     r = api.deregister_identity(str.encode(json.dumps({
         "publicKey": bytes.decode(base64.b64encode(proto.get_vk())),
