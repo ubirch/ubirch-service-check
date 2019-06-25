@@ -31,47 +31,48 @@ import ecdsa as ecdsa
 import ed25519
 import requests
 import ubirch
-import msgpack
 from ubirch import API
-
-import c8y_client
 
 LOGLEVEL = os.getenv("LOGLEVEL", "DEBUG").upper()
 logging.basicConfig(format='%(asctime)s %(name)20.20s %(levelname)-8.8s %(message)s', level=LOGLEVEL)
 logger = logging.getLogger()
+# change this if you want requests log messages
+logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 ERRORS = 0
 
 UBIRCH_ENV = os.getenv("UBIRCH_ENV", "dev")
 UBIRCH_AUTH = os.getenv("UBIRCH_AUTH")
-SERVER_PUBKEY = os.getenv("SERVER_PUBKEY")
 TEST_UUID = os.getenv("TEST_UUID")
 TEST_KEY_EDDSA = os.getenv("TEST_KEY_EDDSA")
 TEST_KEY_ECDSA = os.getenv("TEST_KEY_ECDSA")
-NEO4J_URL = os.getenv("NEO4J_URL")
-NEO4J_AUTH = os.getenv("NEO4J_AUTH")
-C8Y_AUTH_EDDSA = os.getenv("C8Y_AUTH_EDDSA")
-C8Y_AUTH_ECDSA = os.getenv("C8Y_AUTH_EDDSA")
-
+SRVR_KEY_EDDSA = os.getenv("SRVR_KEY_EDDSA", "a2403b92bc9add365b3cd12ff120d020647f84ea6983f98bc4c87e0f4be8cd66")
+SRVR_KEY_ECDSA = os.getenv("SRVR_KEY_ECDSA")
 
 logger.debug(f"UBIRCH_ENV      = '{UBIRCH_ENV}'")
 logger.debug(f"UBIRCH_AUTH     = '{UBIRCH_AUTH}")
-logger.debug(f"NEOJ4_URL       = '{NEO4J_URL}'")
-logger.debug(f"NEOJ4_AUTH      = '{NEO4J_AUTH}'")
 logger.debug(f"TEST_UUID       = '{TEST_UUID}'")
-logger.debug(f"SERVER_PUBKEY   = '{SERVER_PUBKEY}'")
+logger.debug(f"SRVR_KEY_EDDSA  = '{SRVR_KEY_EDDSA}'")
+logger.debug(f"SRVR_KEY_ECDSA  = '{SRVR_KEY_ECDSA}'")
 logger.debug(f"TEST_KEY_EDDSA  = '{TEST_KEY_EDDSA}'")
 logger.debug(f"TEST_KEY_ECDSA  = '{TEST_KEY_ECDSA}'")
-logger.debug(f"C8Y_AUTH_EDDSA  = '{C8Y_AUTH_EDDSA}'")
-logger.debug(f"C8Y_AUTH_ECDSA  = '{C8Y_AUTH_ECDSA}'")
 
 
 class Proto(ubirch.Protocol, ABC):
-    SERVER_EDDSA_KEY = SERVER_PUBKEY or "a2403b92bc9add365b3cd12ff120d020647f84ea6983f98bc4c87e0f4be8cd66"
+    SERVER_EDDSA_KEY = SRVR_KEY_EDDSA or None
+    SERVER_ECDSA_KEY = SRVR_KEY_ECDSA or None
 
     def __init__(self, uuid: UUID) -> None:
         super().__init__()
-        self.__vk_server = ed25519.VerifyingKey(self.SERVER_EDDSA_KEY, encoding='hex')
+        self.__vk_eddsa = ed25519.VerifyingKey(self.SERVER_EDDSA_KEY, encoding='hex')
+        if self.SERVER_ECDSA_KEY is not None:
+            self.__vk_ecdsa = ecdsa.VerifyingKey.from_string(binascii.unhexlify(self.SERVER_ECDSA_KEY),
+                                                                                curve=ecdsa.curves.NIST256p,
+                                                                                hashfunc=hashlib.sha256)
+        self.sk = None
+        self.vk = None
+        self.type = None
+        self.uuid = None
 
     def update_key(self, uuid: UUID, key: str, type: str):
         if type == "ECC_ED25519":
@@ -88,7 +89,7 @@ class Proto(ubirch.Protocol, ABC):
 
     def _hash(self, message: bytes) -> bytes:
         if self.type == 'ECC_ED25519':
-            return super(self)._hash(message)
+            return ubirch.Protocol._hash(self, message)
         else:
             return message
 
@@ -96,7 +97,11 @@ class Proto(ubirch.Protocol, ABC):
         return self.sk.sign(message)
 
     def _verify(self, uuid: UUID, message: bytes, signature: bytes):
-        return self.__vk_server.verify(signature, hashlib.sha512(message).digest())
+        # TODO fix this as soon as the server can create different signatures
+        if self.type == 'ECC_ED25519' or self.type == 'ecdsa-p256v1':
+            return self.__vk_eddsa.verify(signature, ubirch.Protocol._hash(self, message))
+        else:
+            return self.__vk_ecdsa.verify(signature, message)
 
     def get_vk(self) -> bytes:
         if self.type == "ECC_ED25519":
@@ -124,7 +129,7 @@ class Proto(ubirch.Protocol, ABC):
         }
 
 
-def run_tests(api, proto, uuid, c8y_auth, key, type) -> int:
+def run_tests(api, proto, uuid, auth, key, type) -> int:
     MESSAGES = []
 
     proto.update_key(uuid, key, type)
@@ -146,57 +151,43 @@ def run_tests(api, proto, uuid, c8y_auth, key, type) -> int:
         pubKeyInfo['validNotBefore'] = str(datetime.utcfromtimestamp(pubKeyInfo['validNotBefore']).isoformat() + ".000Z")
 
         signable_json = json.dumps(pubKeyInfo, separators=(',', ':')).encode()
-        logger.info(signable_json)
+        # logger.info(signable_json.decode())
         signed_message = proto._sign(uuid, signable_json)
         signature = base64.b64encode(signed_message).decode()
         pubKeyRegMsg = {'pubKeyInfo': pubKeyInfo, 'signature': signature}
         pubKeyRegMsgJson = json.dumps(pubKeyRegMsg).encode()
-        logger.info(pubKeyRegMsgJson)
-        logger.info(api.register_identity(pubKeyRegMsgJson).content.decode())
+        logger.info(f"=== registering public key: {api.register_identity(pubKeyRegMsgJson).content.decode()}")
 
-    # update hardware id of the device, so the authentication works
-    c8y = c8y_client.client(uuid, c8y_auth)
-    c8y.publish("s/us", f"110,{uuid},SERVICE CHECK,0.0.2")
-
-    # send signed messages
-    for n in range(1, 2):
+    # send 5 signed and 5 chained messages
+    for n in range(1, 11):
         timestamp = datetime.utcnow()
-        message = "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat())
-
-        c8y.publish("s/us", "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat()))
-        msg = proto.message_signed(uuid, 0x00, hashlib.sha512(message.encode()).digest())
+        message = "{},{}".format(n, timestamp.isoformat())
+        if n < 6:
+            msg = proto.message_signed(uuid, 0x00, hashlib.sha512(message.encode()).digest())
+        else:
+            msg = proto.message_chained(uuid, 0x00, hashlib.sha512(message.encode()).digest())
         MESSAGES.append(msg)
         time.sleep(1)
-    # send chained messages
-    # for n in range(6, 11):
-    #     timestamp = datetime.utcnow()
-    #     message = "200,customValue,custom,{},X,{}".format(n, timestamp.isoformat())
-    #     c8y.publish("s/us", message)
-    #     msg = proto.message_chained(testDeviceUUID['Ed25519'], 0x00, hashlib.sha512(message.encode()).digest())
-    #     MESSAGES.append(msg)
-    #     time.sleep(1)
-
-    # http.client.HTTPConnection.debuglevel = 1
 
     ERRORS = 0
     # send out prepared messages
     for n, msg in enumerate(MESSAGES):
         r = requests.post(f"https://niomon.{UBIRCH_ENV}.ubirch.com/",
                           headers={"X-Niomon-Purge-Caches": "true"},
-                          data=msg, auth=tuple(c8y.auth.split(":")))
+                          data=msg, auth=tuple(auth.split(":")))
         if r.status_code == requests.codes.OK:
             try:
-                logger.info(f"OK  {n:02d} {repr(proto.message_verify(r.content))}")
+                logger.info(f"=== OK  {n:02d} {repr(proto.message_verify(r.content))}")
             except Exception as e:
-                logger.error(f"ERR #{n:03d} verification failed: {binascii.hexlify(r.content).decode()}")
-                logger.error(f"ERR ===> {repr(r.content)}")
+                logger.error(f"!!! ERR #{n:03d} verification failed: {binascii.hexlify(r.content).decode()}")
+                logger.error(f"!!! ERR ===> {repr(r.content)}")
         else:
-            logger.error(f"ERR #{n:03d} {binascii.hexlify(msg).decode()}")
-            logger.error(f"HTTP {r.status_code:03d} {binascii.hexlify(r.content).decode()}")
+            logger.error(f"!!! ERR #{n:03d} {binascii.hexlify(msg).decode()}")
+            logger.error(f"!!! HTTP {r.status_code:03d} {binascii.hexlify(r.content).decode()}")
             try:
-                logger.error(f"RSP #{n:03d} {proto.message_verify(r.content)}")
+                logger.error(f"!!! RSP #{n:03d} {proto.message_verify(r.content)}")
             except Exception as e:
-                logger.error(f"can't decode and verify response: {e.args}")
+                logger.error(f"!!! can't decode and verify response: {e.args}")
                 pass
             ERRORS += 1
 
@@ -204,10 +195,11 @@ def run_tests(api, proto, uuid, c8y_auth, key, type) -> int:
         "publicKey": bytes.decode(base64.b64encode(proto.get_vk())),
         "signature": bytes.decode(base64.b64encode(proto.sk.sign(proto.get_vk())))
     })))
+    logger.info(f"=== de-registering public key: {r.content.decode()}")
     if r.status_code == requests.codes.ok:
-        logger.error("OK  de-register key")
+        logger.info("=== OK  de-register key")
     else:
-        logger.error(f"ERR de-register key failed: '{r.content}'")
+        logger.error(f"!!! ERR de-register key failed: '{r.content}'")
         ERRORS +=1
 
     return ERRORS
@@ -220,12 +212,14 @@ logger.info(f"** UUID: {DEVICE_UUID}")
 api = API(auth=UBIRCH_AUTH, env=UBIRCH_ENV, debug=(LOGLEVEL == 'DEBUG'))
 protocol = Proto(DEVICE_UUID)
 
-# errors = run_tests(api, protocol, DEVICE_UUID, C8Y_AUTH_EDDSA, TEST_KEY_EDDSA, "ECC_ED25519")
+# logger.info("== EDDSA ==================================================")
+# errors = run_tests(api, protocol, DEVICE_UUID, UBIRCH_AUTH, TEST_KEY_EDDSA, "ECC_ED25519")
 # if errors > 0:
 #     logger.error(f"EDDSA ERRORS: {errors}")
 #     exit(-1)
 
-errors = run_tests(api, protocol, DEVICE_UUID, C8Y_AUTH_EDDSA, TEST_KEY_ECDSA, "ecdsa-p256v1")
+logger.info("== ECDSA ==================================================")
+errors = run_tests(api, protocol, DEVICE_UUID, UBIRCH_AUTH, TEST_KEY_ECDSA, "ecdsa-p256v1")
 if errors > 0:
     logger.error(f"ECDSA ERRORS: {errors}")
     exit(-1)
