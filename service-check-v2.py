@@ -242,7 +242,7 @@ def run_tests(api, proto, uuid, auth, key, type) -> int:
                 ERRORS += 1
         else:
             logger.error(f"!!! ERR #{n:03d} verifications failed: {r.status_code} {r.content.decode()}")
-            # ERRORS += 1
+            ERRORS += 1
 
     r = api.deregister_identity(str.encode(json.dumps({
         "publicKey": bytes.decode(base64.b64encode(proto.get_vk())),
