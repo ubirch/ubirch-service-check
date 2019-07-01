@@ -46,11 +46,17 @@ ICINGA_URL = os.getenv("ICINGA_URL")
 ICINGA_AUTH = os.getenv("ICINGA_AUTH")
 UBIRCH_ENV = os.getenv("UBIRCH_ENV", "dev")
 UBIRCH_AUTH = os.getenv("UBIRCH_AUTH")
-TEST_UUID = os.getenv("TEST_UUID", "ffff160c-6117-5b89-ac98-15aeb52655e0")
+TEST_UUID = os.getenv("TEST_UUID")
 TEST_KEY_EDDSA = os.getenv("TEST_KEY_EDDSA")
 TEST_KEY_ECDSA = os.getenv("TEST_KEY_ECDSA")
-SRVR_KEY_EDDSA = os.getenv("SRVR_KEY_EDDSA", "a2403b92bc9add365b3cd12ff120d020647f84ea6983f98bc4c87e0f4be8cd66")
+SRVR_KEY_EDDSA = os.getenv("SRVR_KEY_EDDSA")
 SRVR_KEY_ECDSA = os.getenv("SRVR_KEY_ECDSA")
+
+if not TEST_UUID or TEST_UUID == '':
+    TEST_UUID = "ffff160c-6117-5b89-ac98-15aeb52655e0"
+
+if not SRVR_KEY_EDDSA or SRVR_KEY_EDDSA == '':
+    SRVR_KEY_EDDSA = "a2403b92bc9add365b3cd12ff120d020647f84ea6983f98bc4c87e0f4be8cd66"
 
 logger.debug(f"ICINGA_URL      = '{ICINGA_URL}'")
 logger.debug(f"ICINGA_AUTH     = '{ICINGA_AUTH}'")
@@ -61,6 +67,13 @@ logger.debug(f"SRVR_KEY_EDDSA  = '{SRVR_KEY_EDDSA}'")
 logger.debug(f"SRVR_KEY_ECDSA  = '{SRVR_KEY_ECDSA}'")
 logger.debug(f"TEST_KEY_EDDSA  = '{TEST_KEY_EDDSA}'")
 logger.debug(f"TEST_KEY_ECDSA  = '{TEST_KEY_ECDSA}'")
+
+if not TEST_KEY_EDDSA or TEST_KEY_EDDSA == '':
+    logger.error("MISSING EDDSA KEY")
+    exit(-1)
+if not TEST_KEY_ECDSA or TEST_KEY_ECDSA == '':
+    logger.error("MISSING ECDSA KEY")
+    exit(-1)
 
 # == NAGIOS / ICINGA SETTINGS ==========================================================
 NAGIOS_OK = 0
