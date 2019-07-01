@@ -70,31 +70,35 @@ NAGIOS_UNKNOWN = 3
 
 
 def nagios(client, env, service, code, message="OK"):
-    if not client: client = "ubirch"
+    if not client: client = "niomon"
     if not env: env = "local"
     env = client + "." + env
 
     data = {
         "exit_status": code,
         "plugin_output": message,
-        "check_source": env,
+        "check_source": env + ".v2",
         "ttl": 3600.0
     }
 
     if code == NAGIOS_OK:
-        logger.info("{}.ubirch.com {} {}".format(env, service, message))
+        logger.info(f"{env}.ubirch.com {service} {message}")
     elif code == NAGIOS_WARNING:
-        logger.warning("{}.ubirch.com {} {}".format( env, service, message))
+        logger.warning(f"{env}.ubirch.com {service} {message}")
     else:
-        logger.error("{}.ubirch.com {} {}".format(env, service, message))
+        logger.error(f"{env}.ubirch.com {service} {message}")
 
-    if ICINGA_URL and ICINGA_AUTH:
-        r = requests.post(ICINGA_URL + "?" + "service={}.ubirch.com!{}".format(env, service),
-                          json=data, headers={"Accept": "application/json"}, auth=tuple(ICINGA_AUTH.split(":")))
-        if r.status_code != 200:
-            logger.error("ERROR: {}: {}".format(r.status_code, bytes.decode(r.content)))
-        else:
-            logger.debug("{}: {}".format(r.status_code, bytes.decode(r.content)))
+    if ICINGA_URL:
+        service_url = ICINGA_URL + f"?service={env}.ubirch.com!{service}"
+        logger.info(f"ICINGA: {service_url}")
+        logger.info(f"ICINGA: {data}")
+        if ICINGA_AUTH:
+            r = requests.post(service_url,
+                              json=data, headers={"Accept": "application/json"}, auth=tuple(ICINGA_AUTH.split(":")))
+            if r.status_code != 200:
+                logger.error("ERROR: {}: {}".format(r.status_code, bytes.decode(r.content)))
+            else:
+                logger.debug("{}: {}".format(r.status_code, bytes.decode(r.content)))
 
 
 # == ubirch protocol implementation =====================================================
