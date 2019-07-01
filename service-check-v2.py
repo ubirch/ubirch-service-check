@@ -173,7 +173,7 @@ class Proto(ubirch.Protocol, ABC):
         }
 
 
-def run_tests(api, proto, uuid, auth, key, type) -> int:
+def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
     MESSAGES = []
 
     proto.update_key(uuid, key, type)
@@ -213,7 +213,10 @@ def run_tests(api, proto, uuid, auth, key, type) -> int:
             msg = proto.message_chained(uuid, 0x00, digest)
         MESSAGES.append([msg, digest])
 
-    ERRORS = 0
+    errors_gnrl = 0
+    errors_send = 0
+    errors_vrfy = 0
+
     # send out prepared messages
     for n, msg in enumerate(MESSAGES):
         r = requests.post(f"https://niomon.{UBIRCH_ENV}.ubirch.com/",
@@ -222,9 +225,10 @@ def run_tests(api, proto, uuid, auth, key, type) -> int:
         if r.status_code == requests.codes.OK:
             try:
                 logger.info(f"=== OK  #{n:03d} {repr(proto.message_verify(r.content))}")
-            except Exception as e:
-                logger.error(f"!!! ERR #{n:03d} verification failed: {binascii.hexlify(r.content).decode()}")
+            except Exception:
+                logger.error(f"!!! ERR #{n:03d} response verification failed: {binascii.hexlify(r.content).decode()}")
                 logger.error(f"!!! ERR ===> {repr(r.content)}")
+                errors_send += 1
         else:
             logger.error(f"!!! ERR #{n:03d} {binascii.hexlify(msg[0]).decode()}")
             logger.error(f"!!! HTTP {r.status_code:03d} {binascii.hexlify(r.content).decode()}")
@@ -232,8 +236,7 @@ def run_tests(api, proto, uuid, auth, key, type) -> int:
                 logger.error(f"!!! RSP #{n:03d} {proto.message_verify(r.content)}")
             except Exception as e:
                 logger.error(f"!!! can't decode and verify response: {e.args}")
-                pass
-            ERRORS += 1
+            errors_send += 1
 
         r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/verify",
                           headers={"Accept": "application/json", "Content-Type": "text/plain"},
@@ -243,10 +246,10 @@ def run_tests(api, proto, uuid, auth, key, type) -> int:
                 logger.info(f"=== OK  #{n:03d} verification matches")
             else:
                 logger.error(f"!!! ERR #{n:03d} verification faileds")
-                ERRORS += 1
+                errors_vrfy += 1
         else:
-            logger.error(f"!!! ERR #{n:03d} verifications failed: {r.status_code} {r.content.decode()}")
-            ERRORS += 1
+            logger.error(f"!!! ERR #{n:03d} verification failed: {r.status_code} {r.content.decode()}")
+            errors_vrfy += 1
 
     r = api.deregister_identity(str.encode(json.dumps({
         "publicKey": bytes.decode(base64.b64encode(proto.get_vk())),
@@ -257,9 +260,9 @@ def run_tests(api, proto, uuid, auth, key, type) -> int:
         logger.info("=== OK  de-register key")
     else:
         logger.error(f"!!! ERR de-register key failed: '{r.content}'")
-        ERRORS +=1
+        errors_gnrl +=1
 
-    return ERRORS
+    return errors_gnrl, errors_send, errors_vrfy
 
 
 # Device Test UUID
@@ -272,19 +275,19 @@ protocol = Proto(DEVICE_UUID)
 has_failed = False
 
 logger.info("== EDDSA ==================================================")
-errors = run_tests(api, protocol, uuid.uuid5(DEVICE_UUID, "ED25519"), UBIRCH_AUTH, TEST_KEY_EDDSA, "ECC_ED25519")
-if errors > 0:
-    logger.error(f"EDDSA ERRORS: {errors}")
-    nagios(None, UBIRCH_ENV, "ED25519", NAGIOS_ERROR, f"{errors} checks failed")
+(gen, snd, vrf) = run_tests(api, protocol, uuid.uuid5(DEVICE_UUID, "ED25519"), UBIRCH_AUTH, TEST_KEY_EDDSA, "ECC_ED25519")
+if gen > 0 or snd > 0 or vrf > 0:
+    logger.error(f"EDDSA ERRORS: general={gen}, send={snd}, verify={vrf}")
+    nagios(None, UBIRCH_ENV, "ED25519", NAGIOS_ERROR, f"{gen} key/general failures, {snd} send failures, {vrf} verification failures")
     has_failed |= True
 else:
     nagios(None, UBIRCH_ENV, "ED25519", NAGIOS_OK, f"all checks successful")
 
 logger.info("== ECDSA ==================================================")
-errors = run_tests(api, protocol, uuid.uuid5(DEVICE_UUID, "ECDSA"), UBIRCH_AUTH, TEST_KEY_ECDSA, "ecdsa-p256v1")
-if errors > 0:
-    logger.error(f"ECDSA ERRORS: {errors}")
-    nagios(None, UBIRCH_ENV, "ECDSA", NAGIOS_ERROR, f"{errors} checks failed")
+(gen, snd, vrf) = run_tests(api, protocol, uuid.uuid5(DEVICE_UUID, "ECDSA"), UBIRCH_AUTH, TEST_KEY_ECDSA, "ecdsa-p256v1")
+if gen > 0 or snd > 0 or vrf > 0:
+    logger.error(f"ECDSA ERRORS: general={gen}, send={snd}, verify={vrf}")
+    nagios(None, UBIRCH_ENV, "ECDSA", NAGIOS_ERROR, f"{gen} key/general failures, {snd} send failures, {vrf} verification failures")
     has_failed |= True
 else:
     nagios(None, UBIRCH_ENV, "ECDSA", NAGIOS_OK, f"all checks successful")
