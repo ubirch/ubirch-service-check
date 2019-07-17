@@ -239,7 +239,7 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
         try:
             r = requests.post(f"https://niomon.{UBIRCH_ENV}.ubirch.com/",
                               headers={"X-Niomon-Purge-Caches": "true"},
-                              timeout=1,
+                              timeout=5,
                               data=msg[0], auth=tuple(auth.split(":")))
 
             if r.status_code == requests.codes.OK:
@@ -264,7 +264,7 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
         try:
             r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/verify",
                               headers={"Accept": "application/json", "Content-Type": "text/plain"},
-                              timeout=1,
+                              timeout=5,
                               data=base64.b64encode(msg[1]))
             if r.status_code == requests.codes.ok:
                 if json.loads(r.content)["seal"] == base64.b64encode(msg[0]).decode():
