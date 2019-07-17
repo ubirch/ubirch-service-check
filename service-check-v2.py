@@ -106,12 +106,16 @@ def nagios(client, env, service, code, message="OK"):
         logger.info(f"ICINGA: {service_url}")
         logger.info(f"ICINGA: {data}")
         if ICINGA_AUTH:
-            r = requests.post(service_url,
-                              json=data, headers={"Accept": "application/json"}, auth=tuple(ICINGA_AUTH.split(":")))
-            if r.status_code != 200:
-                logger.error("ERROR: {}: {}".format(r.status_code, bytes.decode(r.content)))
-            else:
-                logger.debug("{}: {}".format(r.status_code, bytes.decode(r.content)))
+            try:
+                r = requests.post(service_url,
+                                  timeout=5,
+                                  json=data, headers={"Accept": "application/json"}, auth=tuple(ICINGA_AUTH.split(":")))
+                if r.status_code != 200:
+                    logger.error(f"ERROR: {r.status_code}: {bytes.decode(r.content)}")
+                else:
+                    logger.debug(f"{r.status_code}: {bytes.decode(r.content)}")
+            except Exception as e:
+                logger.error(f"ERROR: {e.args}")
 
 
 # == ubirch protocol implementation =====================================================
@@ -218,7 +222,7 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
     # send 5 signed and 5 chained messages
     for n in range(1, 11):
         timestamp = datetime.utcnow()
-        message = "{},{},{}".format(n, timestamp.isoformat(), random.random()*1e9)
+        message = f"{n},{timestamp.isoformat()},{random.random()*1e9}"
         digest = hashlib.sha512(message.encode()).digest()
         if n < 6:
             msg = proto.message_signed(uuid, 0x00, digest)
@@ -232,36 +236,47 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
 
     # send out prepared messages
     for n, msg in enumerate(MESSAGES):
-        r = requests.post(f"https://niomon.{UBIRCH_ENV}.ubirch.com/",
-                          #headers={"X-Niomon-Purge-Caches": "true"},
-                          data=msg[0], auth=tuple(auth.split(":")))
-        if r.status_code == requests.codes.OK:
-            try:
-                logger.info(f"=== OK  #{n:03d} {repr(proto.message_verify(r.content))}")
-            except Exception:
-                logger.error(f"!!! ERR #{n:03d} response verification failed: {binascii.hexlify(r.content).decode()}")
-                logger.error(f"!!! ERR ===> {repr(r.content)}")
+        try:
+            r = requests.post(f"https://niomon.{UBIRCH_ENV}.ubirch.com/",
+                              headers={"X-Niomon-Purge-Caches": "true"},
+                              timeout=1,
+                              data=msg[0], auth=tuple(auth.split(":")))
+
+            if r.status_code == requests.codes.OK:
+                try:
+                    logger.info(f"=== OK  #{n:03d} {repr(proto.message_verify(r.content))}")
+                except Exception:
+                    logger.error(f"!!! ERR #{n:03d} response verification failed: {binascii.hexlify(r.content).decode()}")
+                    logger.error(f"!!! ERR ===> {repr(r.content)}")
+                    errors_send += 1
+            else:
+                logger.error(f"!!! ERR #{n:03d} {binascii.hexlify(msg[0]).decode()}")
+                logger.error(f"!!! HTTP {r.status_code:03d} {binascii.hexlify(r.content).decode()}")
+                try:
+                    logger.error(f"!!! RSP #{n:03d} {proto.message_verify(r.content)}")
+                except Exception as e:
+                    logger.error(f"!!! can't decode and verify response: {e.args}")
                 errors_send += 1
-        else:
-            logger.error(f"!!! ERR #{n:03d} {binascii.hexlify(msg[0]).decode()}")
-            logger.error(f"!!! HTTP {r.status_code:03d} {binascii.hexlify(r.content).decode()}")
-            try:
-                logger.error(f"!!! RSP #{n:03d} {proto.message_verify(r.content)}")
-            except Exception as e:
-                logger.error(f"!!! can't decode and verify response: {e.args}")
+        except Exception as e:
+            logger.error(f"!!! ERR #{n:03d} request timeout sending message: {e.args}")
             errors_send += 1
 
-        r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/verify",
-                          headers={"Accept": "application/json", "Content-Type": "text/plain"},
-                          data=base64.b64encode(msg[1]))
-        if r.status_code == requests.codes.ok:
-            if json.loads(r.content)["seal"] == base64.b64encode(msg[0]).decode():
-                logger.info(f"=== OK  #{n:03d} verification matches")
+        try:
+            r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/verify",
+                              headers={"Accept": "application/json", "Content-Type": "text/plain"},
+                              timeout=1,
+                              data=base64.b64encode(msg[1]))
+            if r.status_code == requests.codes.ok:
+                if json.loads(r.content)["seal"] == base64.b64encode(msg[0]).decode():
+                    logger.info(f"=== OK  #{n:03d} verification matches")
+                else:
+                    logger.error(f"!!! ERR #{n:03d} verification faileds")
+                    errors_vrfy += 1
             else:
-                logger.error(f"!!! ERR #{n:03d} verification faileds")
+                logger.error(f"!!! ERR #{n:03d} verification failed: {r.status_code} {r.content.decode()}")
                 errors_vrfy += 1
-        else:
-            logger.error(f"!!! ERR #{n:03d} verification failed: {r.status_code} {r.content.decode()}")
+        except Exception as e:
+            logger.error(f"!!! ERR #{n:03d} request timeout verifying message: {e.args}")
             errors_vrfy += 1
 
     r = api.deregister_identity(str.encode(json.dumps({
