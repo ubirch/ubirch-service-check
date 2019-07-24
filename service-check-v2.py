@@ -238,7 +238,7 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
     for n, msg in enumerate(MESSAGES):
         try:
             r = requests.post(f"https://niomon.{UBIRCH_ENV}.ubirch.com/",
-                              headers={"X-Niomon-Purge-Caches": "true"},
+                              # headers={"X-Niomon-Purge-Caches": "true"},
                               timeout=5,
                               data=msg[0], auth=tuple(auth.split(":")))
 
