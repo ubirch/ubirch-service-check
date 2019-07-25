@@ -150,7 +150,7 @@ class Proto(ubirch.Protocol, ABC):
 
 
 
-def run_tests(api, proto, uuid, auth, key, type, count) -> (int, int, int):
+def run_tests(api, proto, uuid, auth, key, type, count, concurrency) -> (int, int, int):
     MESSAGES = []
     
     proto.update_key(uuid, key, type)
@@ -189,76 +189,77 @@ def run_tests(api, proto, uuid, auth, key, type, count) -> (int, int, int):
         MESSAGES.append([msg, digest])
     logger.info(f"=== done")
 
-
-    def post(auth, msg, n, timeout):
+    def post(req, auth, msg, n, timeout):
         error_send = 0
         error_vrfy = 0
-        if n % 200 == 0:
-            sys.stdout.write(f"\n {n:06d} ")
+        if n % 100 == 0:
+            sys.stderr.write(f"\n {n:06d} ")
         try:
-            r = requests.post(f"https://niomon.{UBIRCH_ENV}.ubirch.com/",
+            r = req.post(f"https://niomon.{UBIRCH_ENV}.ubirch.com/",
                               # headers={"X-Niomon-Purge-Caches": "true"},
                               timeout=timeout,
                               data=bytes(msg[0]), auth=tuple(auth.split(":")))
 
             if r.status_code == requests.codes.OK:
-                sys.stderr.write(".")
-                # try:
-                #     logger.info(f"=== OK  #{n:03d} {repr(proto.message_verify(r.content))}")
-                # except Exception:
-                #     logger.error(f"!!! ERR #{n:03d} response verification failed: {binascii.hexlify(r.content).decode()}")
-                #     logger.error(f"!!! ERR ===> {repr(r.content)}")
-                #     error_send = True
+                try:
+                    proto.message_verify(r.content)
+                    sys.stderr.write(".")
+                except:
+                    sys.stderr.write("x")
+                    error_send = True
             else:
                 sys.stderr.write(f"!{r.status_code}")
-                # logger.error(f"!!! ERR #{n:03d} {binascii.hexlify(msg[0]).decode()}")
-                # logger.error(f"!!! HTTP {r.status_code:03d} {binascii.hexlify(r.content).decode()}")
-                # try:
-                #     logger.error(f"!!! RSP #{n:03d} {proto.message_verify(r.content)}")
-                # except Exception as e:
-                #     logger.error(f"!!! can't decode and verify response: {e.args}")
+                try:
+                    proto.message_verify(r.content)
+                    sys.stderr.write("?")
+                except:
+                    sys.stderr.write("X")
                 error_send=True
         except Exception as e:
-            sys.stdout.write("T")
-            # logger.error(f"!!! ERR #{n:03d} request timeout sending message: {e.args}", e)
+            sys.stderr.write("T")
             error_send = True
 
         # try:
         #     time.sleep(5)
-        #     r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/verify",
+        #     r = req.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/verify",
         #                       headers={"Accept": "application/json", "Content-Type": "text/plain"},
         #                       timeout=timeout,
         #                       data=base64.b64encode(msg[1]))
         #     if r.status_code == requests.codes.ok:
         #         if json.loads(r.content)["seal"] == base64.b64encode(msg[0]).decode():
-        #             logger.info(f"=== OK  #{n:03d} verification matches")
+        #             sys.stderr.write("*")
         #         else:
-        #             logger.error(f"!!! ERR #{n:03d} verification faileds")
+        #             sys.stderr.write("#")
         #             error_vrfy = True
         #     else:
-        #         logger.error(f"!!! ERR #{n:03d} verification failed: {r.status_code} {r.content.decode()}")
+        #         sys.stderr.write(f"E{r.status_code}")
         #         error_vrfy = True
-        # except Exception as e:
-        #     logger.error(f"!!! ERR #{n:03d} request timeout verifying message: {e.args}")
+        # except:
+        #     sys.stderr.write("V")
         #     error_vrfy = True
-        return (error_send, error_vrfy)
+        return error_send, error_vrfy
 
     errors_gnrl = 0
     errors_send = 0
     errors_vrfy = 0
 
+    sess = requests.Session()
+    adapter = requests.adapters.HTTPAdapter(pool_connections=concurrency, pool_maxsize=int(concurrency*1.3))
+    sess.mount('https://', adapter)
+
+    MESSAGES = enumerate(MESSAGES)
     start = time.process_time_ns()
-    with ThreadPoolExecutor(max_workers=20) as executor:
-        future_to_url = {executor.submit(post, auth, msg, i, 30): (i, msg) for (i, msg) in enumerate(MESSAGES)}
-        for future in concurrent.futures.as_completed(future_to_url):
-            url = future_to_url[future]
-            try:
-                (s, v) = future.result()
-                errors_send += s
-                errors_vrfy += v
-            except Exception as e:
-                errors_gnrl += 1
-                logger.error("??", e)
+    with ThreadPoolExecutor(max_workers=int(concurrency)) as executor:
+        future_to_url = {executor.submit(post, sess, auth, msg, i, 30): (i, msg) for (i, msg) in MESSAGES}
+        # for future in concurrent.futures.as_completed(future_to_url):
+        #     url = future_to_url[future]
+        #     try:
+        #         (s, v) = future.result()
+        #         errors_send += s
+        #         errors_vrfy += v
+        #     except Exception as e:
+        #         errors_gnrl += 1
+        #         logger.error("??", e)
     elapsed = (time.process_time_ns() - start)
     sys.stderr.write("\n")
     logger.info(f"{elapsed/1e9:.2f}s / {count / (elapsed / 1e9):.2f} msg/s")
@@ -287,9 +288,10 @@ protocol = Proto(DEVICE_UUID)
 has_failed = False
 
 count = 10000
+concurrency = 100
 
 logger.info("== EDDSA ==================================================")
-(gen, snd, vrf) = run_tests(api, protocol, uuid.uuid5(DEVICE_UUID, "ED25519"), UBIRCH_AUTH, TEST_KEY_EDDSA, "ECC_ED25519", count)
+(gen, snd, vrf) = run_tests(api, protocol, uuid.uuid5(DEVICE_UUID, "ED25519"), UBIRCH_AUTH, TEST_KEY_EDDSA, "ECC_ED25519", count, concurrency)
 logger.info(f"ERRORS: general={gen}, send={snd}, verify={vrf}")
 
 # logger.info("== ECDSA ==================================================")
