@@ -187,6 +187,7 @@ def run_tests(api, proto, uuid, auth, key, type, count, concurrency) -> (int, in
         digest = hashlib.sha512(message.encode()).digest()
         msg = proto.message_signed(uuid, 0x00, digest)
         MESSAGES.append([msg, digest])
+        # logger.info(f"=== {binascii.hexlify(digest)} {binascii.b2a_base64(digest)}")
     logger.info(f"=== done")
 
     def post(req, auth, msg, n, timeout):
@@ -219,24 +220,24 @@ def run_tests(api, proto, uuid, auth, key, type, count, concurrency) -> (int, in
             sys.stderr.write("T")
             error_send = True
 
-        # try:
-        #     time.sleep(5)
-        #     r = req.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/verify",
-        #                       headers={"Accept": "application/json", "Content-Type": "text/plain"},
-        #                       timeout=timeout,
-        #                       data=base64.b64encode(msg[1]))
-        #     if r.status_code == requests.codes.ok:
-        #         if json.loads(r.content)["seal"] == base64.b64encode(msg[0]).decode():
-        #             sys.stderr.write("*")
-        #         else:
-        #             sys.stderr.write("#")
-        #             error_vrfy = True
-        #     else:
-        #         sys.stderr.write(f"E{r.status_code}")
-        #         error_vrfy = True
-        # except:
-        #     sys.stderr.write("V")
-        #     error_vrfy = True
+        try:
+            time.sleep(2)
+            r = req.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/verify",
+                              headers={"Accept": "application/json", "Content-Type": "text/plain"},
+                              timeout=timeout,
+                              data=base64.b64encode(msg[1]))
+            if r.status_code == requests.codes.ok:
+                if json.loads(r.content)["seal"] == base64.b64encode(msg[0]).decode():
+                    sys.stderr.write("*")
+                else:
+                    sys.stderr.write("#")
+                    error_vrfy = True
+            else:
+                sys.stderr.write(f"E{r.status_code}")
+                error_vrfy = True
+        except:
+            sys.stderr.write("V")
+            error_vrfy = True
         return error_send, error_vrfy
 
     errors_gnrl = 0
@@ -287,7 +288,7 @@ protocol = Proto(DEVICE_UUID)
 
 has_failed = False
 
-count = 10000
+count = 100
 concurrency = 100
 
 logger.info("== EDDSA ==================================================")
