@@ -18,6 +18,10 @@
 #
 import base64
 import binascii
+import concurrent
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import logging
@@ -31,10 +35,11 @@ from uuid import UUID
 import ecdsa as ecdsa
 import ed25519
 import requests
+import timer as timer
 import ubirch
 from ubirch import API
 
-LOGLEVEL = os.getenv("LOGLEVEL", "DEBUG").upper()
+LOGLEVEL = os.getenv("LOGLEVEL", "INFO").upper()
 logging.basicConfig(format='%(asctime)s %(name)20.20s %(levelname)-8.8s %(message)s', level=LOGLEVEL)
 logger = logging.getLogger()
 # change this if you want requests log messages
@@ -42,8 +47,6 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 ERRORS = 0
 
-ICINGA_URL = os.getenv("ICINGA_URL")
-ICINGA_AUTH = os.getenv("ICINGA_AUTH")
 UBIRCH_ENV = os.getenv("UBIRCH_ENV", "dev")
 UBIRCH_AUTH = os.getenv("UBIRCH_AUTH")
 TEST_UUID = os.getenv("TEST_UUID")
@@ -53,13 +56,11 @@ SRVR_KEY_EDDSA = os.getenv("SRVR_KEY_EDDSA")
 SRVR_KEY_ECDSA = os.getenv("SRVR_KEY_ECDSA")
 
 if not TEST_UUID or TEST_UUID == '':
-    TEST_UUID = "ffff160c-6117-5b89-ac98-15aeb52655e0"
+    TEST_UUID = "aaaa160c-6117-5b89-ac98-15aeb52655e0"
 
 if not SRVR_KEY_EDDSA or SRVR_KEY_EDDSA == '':
     SRVR_KEY_EDDSA = "a2403b92bc9add365b3cd12ff120d020647f84ea6983f98bc4c87e0f4be8cd66"
 
-logger.debug(f"ICINGA_URL      = '{ICINGA_URL}'")
-logger.debug(f"ICINGA_AUTH     = '{ICINGA_AUTH}'")
 logger.debug(f"UBIRCH_ENV      = '{UBIRCH_ENV}'")
 logger.debug(f"UBIRCH_AUTH     = '{UBIRCH_AUTH}'")
 logger.debug(f"TEST_UUID       = '{TEST_UUID}'")
@@ -74,48 +75,6 @@ if not TEST_KEY_EDDSA or TEST_KEY_EDDSA == '':
 if not TEST_KEY_ECDSA or TEST_KEY_ECDSA == '':
     logger.error("MISSING ECDSA KEY")
     exit(-1)
-
-# == NAGIOS / ICINGA SETTINGS ==========================================================
-NAGIOS_OK = 0
-NAGIOS_WARNING = 1
-NAGIOS_ERROR = 2
-NAGIOS_UNKNOWN = 3
-
-
-def nagios(client, env, service, code, message="OK"):
-    if not client: client = "niomon"
-    if not env: env = "local"
-    env = client + "." + env
-
-    data = {
-        "exit_status": code,
-        "plugin_output": message,
-        "check_source": env + ".v2",
-        "ttl": 3600.0
-    }
-
-    if code == NAGIOS_OK:
-        logger.info(f"{env}.ubirch.com {service} {message}")
-    elif code == NAGIOS_WARNING:
-        logger.warning(f"{env}.ubirch.com {service} {message}")
-    else:
-        logger.error(f"{env}.ubirch.com {service} {message}")
-
-    if ICINGA_URL:
-        service_url = ICINGA_URL + f"?service={env}.ubirch.com!{service}"
-        logger.info(f"ICINGA: {service_url}")
-        logger.info(f"ICINGA: {data}")
-        if ICINGA_AUTH:
-            try:
-                r = requests.post(service_url,
-                                  timeout=5,
-                                  json=data, headers={"Accept": "application/json"}, auth=tuple(ICINGA_AUTH.split(":")))
-                if r.status_code != 200:
-                    logger.error(f"ERROR: {r.status_code}: {bytes.decode(r.content)}")
-                else:
-                    logger.debug(f"{r.status_code}: {bytes.decode(r.content)}")
-            except Exception as e:
-                logger.error(f"ERROR: {e.args}")
 
 
 # == ubirch protocol implementation =====================================================
@@ -190,9 +149,10 @@ class Proto(ubirch.Protocol, ABC):
         }
 
 
-def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
-    MESSAGES = []
 
+def run_tests(api, proto, uuid, auth, key, type, count, concurrency) -> (int, int, int):
+    MESSAGES = []
+    
     proto.update_key(uuid, key, type)
 
     # register the key
@@ -219,65 +179,90 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
         pubKeyRegMsgJson = json.dumps(pubKeyRegMsg).encode()
         logger.info(f"=== registering public key: {api.register_identity(pubKeyRegMsgJson).content.decode()}")
 
+    logger.info(f"=== generating {count} messages")
     # send 5 signed and 5 chained messages
-    for n in range(1, 11):
+    for n in range(1, count + 1):
         timestamp = datetime.utcnow()
         message = f"{n},{timestamp.isoformat()},{random.random()*1e9}"
         digest = hashlib.sha512(message.encode()).digest()
-        if n < 6:
-            msg = proto.message_signed(uuid, 0x00, digest)
-        else:
-            msg = proto.message_chained(uuid, 0x00, digest)
+        msg = proto.message_signed(uuid, 0x00, digest)
         MESSAGES.append([msg, digest])
+    logger.info(f"=== done")
+
+    def post(req, auth, msg, n, timeout):
+        error_send = 0
+        error_vrfy = 0
+        if n % 100 == 0:
+            sys.stderr.write(f"\n {n:06d} ")
+        try:
+            r = req.post(f"https://niomon.{UBIRCH_ENV}.ubirch.com/",
+                              # headers={"X-Niomon-Purge-Caches": "true"},
+                              timeout=timeout,
+                              data=bytes(msg[0]), auth=tuple(auth.split(":")))
+
+            if r.status_code == requests.codes.OK:
+                try:
+                    proto.message_verify(r.content)
+                    sys.stderr.write(".")
+                except:
+                    sys.stderr.write("x")
+                    error_send = True
+            else:
+                sys.stderr.write(f"!{r.status_code}")
+                try:
+                    proto.message_verify(r.content)
+                    sys.stderr.write("?")
+                except:
+                    sys.stderr.write("X")
+                error_send=True
+        except Exception as e:
+            sys.stderr.write("T")
+            error_send = True
+
+        # try:
+        #     time.sleep(5)
+        #     r = req.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/verify",
+        #                       headers={"Accept": "application/json", "Content-Type": "text/plain"},
+        #                       timeout=timeout,
+        #                       data=base64.b64encode(msg[1]))
+        #     if r.status_code == requests.codes.ok:
+        #         if json.loads(r.content)["seal"] == base64.b64encode(msg[0]).decode():
+        #             sys.stderr.write("*")
+        #         else:
+        #             sys.stderr.write("#")
+        #             error_vrfy = True
+        #     else:
+        #         sys.stderr.write(f"E{r.status_code}")
+        #         error_vrfy = True
+        # except:
+        #     sys.stderr.write("V")
+        #     error_vrfy = True
+        return error_send, error_vrfy
 
     errors_gnrl = 0
     errors_send = 0
     errors_vrfy = 0
 
-    # send out prepared messages
-    for n, msg in enumerate(MESSAGES):
-        try:
-            r = requests.post(f"https://niomon.{UBIRCH_ENV}.ubirch.com/",
-                              # headers={"X-Niomon-Purge-Caches": "true"},
-                              timeout=5,
-                              data=msg[0], auth=tuple(auth.split(":")))
+    sess = requests.Session()
+    adapter = requests.adapters.HTTPAdapter(pool_connections=concurrency, pool_maxsize=int(concurrency*1.3))
+    sess.mount('https://', adapter)
 
-            if r.status_code == requests.codes.OK:
-                try:
-                    logger.info(f"=== OK  #{n:03d} {repr(proto.message_verify(r.content))}")
-                except Exception:
-                    logger.error(f"!!! ERR #{n:03d} response verification failed: {binascii.hexlify(r.content).decode()}")
-                    logger.error(f"!!! ERR ===> {repr(r.content)}")
-                    errors_send += 1
-            else:
-                logger.error(f"!!! ERR #{n:03d} {binascii.hexlify(msg[0]).decode()}")
-                logger.error(f"!!! HTTP {r.status_code:03d} {binascii.hexlify(r.content).decode()}")
-                try:
-                    logger.error(f"!!! RSP #{n:03d} {proto.message_verify(r.content)}")
-                except Exception as e:
-                    logger.error(f"!!! can't decode and verify response: {e.args}")
-                errors_send += 1
-        except Exception as e:
-            logger.error(f"!!! ERR #{n:03d} request timeout sending message: {e.args}")
-            errors_send += 1
-
-        try:
-            r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/verify",
-                              headers={"Accept": "application/json", "Content-Type": "text/plain"},
-                              timeout=5,
-                              data=base64.b64encode(msg[1]))
-            if r.status_code == requests.codes.ok:
-                if json.loads(r.content)["seal"] == base64.b64encode(msg[0]).decode():
-                    logger.info(f"=== OK  #{n:03d} verification matches")
-                else:
-                    logger.error(f"!!! ERR #{n:03d} verification faileds")
-                    errors_vrfy += 1
-            else:
-                logger.error(f"!!! ERR #{n:03d} verification failed: {r.status_code} {r.content.decode()}")
-                errors_vrfy += 1
-        except Exception as e:
-            logger.error(f"!!! ERR #{n:03d} request timeout verifying message: {e.args}")
-            errors_vrfy += 1
+    MESSAGES = enumerate(MESSAGES)
+    start = time.process_time_ns()
+    with ThreadPoolExecutor(max_workers=int(concurrency)) as executor:
+        future_to_url = {executor.submit(post, sess, auth, msg, i, 30): (i, msg) for (i, msg) in MESSAGES}
+        # for future in concurrent.futures.as_completed(future_to_url):
+        #     url = future_to_url[future]
+        #     try:
+        #         (s, v) = future.result()
+        #         errors_send += s
+        #         errors_vrfy += v
+        #     except Exception as e:
+        #         errors_gnrl += 1
+        #         logger.error("??", e)
+    elapsed = (time.process_time_ns() - start)
+    sys.stderr.write("\n")
+    logger.info(f"{elapsed/1e9:.2f}s / {count / (elapsed / 1e9):.2f} msg/s")
 
     r = api.deregister_identity(str.encode(json.dumps({
         "publicKey": bytes.decode(base64.b64encode(proto.get_vk())),
@@ -302,23 +287,16 @@ protocol = Proto(DEVICE_UUID)
 
 has_failed = False
 
-logger.info("== EDDSA ==================================================")
-(gen, snd, vrf) = run_tests(api, protocol, uuid.uuid5(DEVICE_UUID, "ED25519"), UBIRCH_AUTH, TEST_KEY_EDDSA, "ECC_ED25519")
-if gen > 0 or snd > 0 or vrf > 0:
-    logger.error(f"EDDSA ERRORS: general={gen}, send={snd}, verify={vrf}")
-    nagios(None, UBIRCH_ENV, "ED25519", NAGIOS_ERROR, f"{gen} key/general failures, {snd} send failures, {vrf} verification failures")
-    has_failed |= True
-else:
-    nagios(None, UBIRCH_ENV, "ED25519", NAGIOS_OK, f"all checks successful")
+count = 10000
+concurrency = 100
 
-logger.info("== ECDSA ==================================================")
-(gen, snd, vrf) = run_tests(api, protocol, uuid.uuid5(DEVICE_UUID, "ECDSA"), UBIRCH_AUTH, TEST_KEY_ECDSA, "ecdsa-p256v1")
-if gen > 0 or snd > 0 or vrf > 0:
-    logger.error(f"ECDSA ERRORS: general={gen}, send={snd}, verify={vrf}")
-    nagios(None, UBIRCH_ENV, "ECDSA", NAGIOS_ERROR, f"{gen} key/general failures, {snd} send failures, {vrf} verification failures")
-    has_failed |= True
-else:
-    nagios(None, UBIRCH_ENV, "ECDSA", NAGIOS_OK, f"all checks successful")
+logger.info("== EDDSA ==================================================")
+(gen, snd, vrf) = run_tests(api, protocol, uuid.uuid5(DEVICE_UUID, "ED25519"), UBIRCH_AUTH, TEST_KEY_EDDSA, "ECC_ED25519", count, concurrency)
+logger.info(f"ERRORS: general={gen}, send={snd}, verify={vrf}")
+
+# logger.info("== ECDSA ==================================================")
+# (gen, snd, vrf) = run_tests(api, protocol, uuid.uuid5(DEVICE_UUID, "ECDSA"), UBIRCH_AUTH, TEST_KEY_ECDSA, "ecdsa-p256v1", count)
+# logger.info(f"ERROS: general={gen}, send={snd}, verify={vrf}")
 
 if has_failed:
     exit(-1)
