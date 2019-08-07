@@ -176,7 +176,7 @@ for service in services:
             if not response['status']:
                 ERRORS += 1
                 nagios(UBIRCH_CLIENT, UBIRCH_ENV, service + "-deepCheck", NAGIOS_ERROR,
-                       r.status_code + " " + response['messages'])
+                       "{} {}".format(r.status_code, response['messages']))
             else:
                 nagios(UBIRCH_CLIENT, UBIRCH_ENV, service + "-deepCheck", NAGIOS_OK)
 
