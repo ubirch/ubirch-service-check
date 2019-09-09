@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import random
+import time
 import uuid
 from abc import ABC
 from datetime import datetime, timedelta
@@ -262,6 +263,8 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
             errors_send += 1
 
         try:
+            # TODO: remove the sleep after fixing the delaying issues
+            time.sleep(3)
             r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/verify",
                               headers={"Accept": "application/json", "Content-Type": "text/plain"},
                               timeout=5,
