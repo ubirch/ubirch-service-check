@@ -39,7 +39,7 @@ LOGLEVEL = os.getenv("LOGLEVEL", "DEBUG").upper()
 logging.basicConfig(format='%(asctime)s %(name)20.20s %(levelname)-8.8s %(message)s', level=LOGLEVEL)
 logger = logging.getLogger()
 # change this if you want requests log messages
-logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(LOGLEVEL)
 
 ERRORS = 0
 
