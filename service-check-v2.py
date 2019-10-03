@@ -35,7 +35,7 @@ import requests
 import ubirch
 from ubirch import API
 
-LOGLEVEL = os.getenv("LOGLEVEL", "DEBUG").upper()
+LOGLEVEL = os.getenv("LOGLEVEL", "INFO").upper()
 logging.basicConfig(format='%(asctime)s %(name)20.20s %(levelname)-8.8s %(message)s', level=LOGLEVEL)
 logger = logging.getLogger()
 # change this if you want requests log messages
@@ -46,6 +46,7 @@ ERRORS = 0
 ICINGA_URL = os.getenv("ICINGA_URL")
 ICINGA_AUTH = os.getenv("ICINGA_AUTH")
 UBIRCH_ENV = os.getenv("UBIRCH_ENV", "dev")
+UBIRCH_AUTH_TYPE = os.getenv("UBIRCH_AUTH_TYPE", "cumulocity")
 UBIRCH_AUTH = os.getenv("UBIRCH_AUTH")
 TEST_UUID = os.getenv("TEST_UUID")
 TEST_KEY_EDDSA = os.getenv("TEST_KEY_EDDSA")
@@ -59,15 +60,16 @@ if not TEST_UUID or TEST_UUID == '':
 if not SRVR_KEY_EDDSA or SRVR_KEY_EDDSA == '':
     SRVR_KEY_EDDSA = "a2403b92bc9add365b3cd12ff120d020647f84ea6983f98bc4c87e0f4be8cd66"
 
-logger.debug(f"ICINGA_URL      = '{ICINGA_URL}'")
-logger.debug(f"ICINGA_AUTH     = '{ICINGA_AUTH}'")
-logger.debug(f"UBIRCH_ENV      = '{UBIRCH_ENV}'")
-logger.debug(f"UBIRCH_AUTH     = '{UBIRCH_AUTH}'")
-logger.debug(f"TEST_UUID       = '{TEST_UUID}'")
-logger.debug(f"SRVR_KEY_EDDSA  = '{SRVR_KEY_EDDSA}'")
-logger.debug(f"SRVR_KEY_ECDSA  = '{SRVR_KEY_ECDSA}'")
-logger.debug(f"TEST_KEY_EDDSA  = '{TEST_KEY_EDDSA}'")
-logger.debug(f"TEST_KEY_ECDSA  = '{TEST_KEY_ECDSA}'")
+logger.debug(f"ICINGA_URL       = '{ICINGA_URL}'")
+logger.debug(f"ICINGA_AUTH      = '{ICINGA_AUTH}'")
+logger.debug(f"UBIRCH_ENV       = '{UBIRCH_ENV}'")
+logger.debug(f"UBIRCH_AUTH_TYPE = '{UBIRCH_AUTH_TYPE}'")
+logger.debug(f"UBIRCH_AUTH      = '{UBIRCH_AUTH}'")
+logger.debug(f"TEST_UUID        = '{TEST_UUID}'")
+logger.debug(f"SRVR_KEY_EDDSA   = '{SRVR_KEY_EDDSA}'")
+logger.debug(f"SRVR_KEY_ECDSA   = '{SRVR_KEY_ECDSA}'")
+logger.debug(f"TEST_KEY_EDDSA   = '{TEST_KEY_EDDSA}'")
+logger.debug(f"TEST_KEY_ECDSA   = '{TEST_KEY_ECDSA}'")
 
 if not TEST_KEY_EDDSA or TEST_KEY_EDDSA == '':
     logger.error("MISSING EDDSA KEY")
@@ -202,23 +204,22 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
     #     logger.info(api.register_identity(msg))
 
     # TODO: this is here, because the key server does not yet understand ubirch-protocol v2
-    if not api.is_identity_registered(uuid):
-        pubKeyInfo = proto.get_certificate()
-        # create a json key registration request
-        pubKeyInfo['hwDeviceId'] = str(uuid)
-        pubKeyInfo['pubKey'] = base64.b64encode(pubKeyInfo['pubKey']).decode()
-        pubKeyInfo['pubKeyId'] = base64.b64encode(pubKeyInfo['pubKeyId']).decode()
-        pubKeyInfo['created'] = str(datetime.utcfromtimestamp(pubKeyInfo['created']).isoformat() + ".000Z")
-        pubKeyInfo['validNotAfter'] = str(datetime.utcfromtimestamp(pubKeyInfo['validNotAfter']).isoformat() + ".000Z")
-        pubKeyInfo['validNotBefore'] = str(datetime.utcfromtimestamp(pubKeyInfo['validNotBefore']).isoformat() + ".000Z")
+    pubKeyInfo = proto.get_certificate()
+    # create a json key registration request
+    pubKeyInfo['hwDeviceId'] = str(uuid)
+    pubKeyInfo['pubKey'] = base64.b64encode(pubKeyInfo['pubKey']).decode()
+    pubKeyInfo['pubKeyId'] = base64.b64encode(pubKeyInfo['pubKeyId']).decode()
+    pubKeyInfo['created'] = str(datetime.utcfromtimestamp(pubKeyInfo['created']).isoformat() + ".000Z")
+    pubKeyInfo['validNotAfter'] = str(datetime.utcfromtimestamp(pubKeyInfo['validNotAfter']).isoformat() + ".000Z")
+    pubKeyInfo['validNotBefore'] = str(datetime.utcfromtimestamp(pubKeyInfo['validNotBefore']).isoformat() + ".000Z")
 
-        signable_json = json.dumps(pubKeyInfo, separators=(',', ':')).encode()
-        # logger.info(signable_json.decode())
-        signed_message = proto._sign(uuid, signable_json)
-        signature = base64.b64encode(signed_message).decode()
-        pubKeyRegMsg = {'pubKeyInfo': pubKeyInfo, 'signature': signature}
-        pubKeyRegMsgJson = json.dumps(pubKeyRegMsg).encode()
-        logger.info(f"=== registering public key: {api.register_identity(pubKeyRegMsgJson).content.decode()}")
+    signable_json = json.dumps(pubKeyInfo, separators=(',', ':')).encode()
+    # logger.info(signable_json.decode())
+    signed_message = proto._sign(uuid, signable_json)
+    signature = base64.b64encode(signed_message).decode()
+    pubKeyRegMsg = {'pubKeyInfo': pubKeyInfo, 'signature': signature}
+    pubKeyRegMsgJson = json.dumps(pubKeyRegMsg).encode()
+    logger.info(f"=== registering public key: {api.register_identity(pubKeyRegMsgJson).content.decode()}")
 
     # send 5 signed and 5 chained messages
     for n in range(1, 11):
@@ -238,10 +239,31 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
     # send out prepared messages
     for n, msg in enumerate(MESSAGES):
         try:
+            if UBIRCH_AUTH_TYPE == "ubirch":
+                credentials = None
+                if type == 'EDDSA':
+                    passwd = binascii.b2a_base64(UBIRCH_AUTH.split(":")[0].encode())[:-1].decode()
+                else:
+                    passwd = binascii.b2a_base64(UBIRCH_AUTH.split(":")[1].encode())[:-1].decode()
+
+                headers = {
+                    'X-Ubirch-Hardware-Id': str(uuid),
+                    'X-Ubirch-Credential': passwd,
+                    'X-Ubirch-Auth-Type': 'ubirch',
+                    "X-Niomon-Purge-Caches": "true",
+                }
+            else:
+                credentials = tuple(auth.split(":"))
+                headers = {
+                    "X-Niomon-Purge-Caches": "true",
+                }
+
+            logger.debug(repr(headers))
             r = requests.post(f"https://niomon.{UBIRCH_ENV}.ubirch.com/",
-                              # headers={"X-Niomon-Purge-Caches": "true"},
+                              headers=headers,
                               timeout=5,
-                              data=msg[0], auth=tuple(auth.split(":")))
+                              data=msg[0],
+                              auth=credentials)
 
             if r.status_code == requests.codes.OK:
                 try:
