@@ -46,7 +46,7 @@ ERRORS = 0
 ICINGA_URL = os.getenv("ICINGA_URL")
 ICINGA_AUTH = os.getenv("ICINGA_AUTH")
 UBIRCH_ENV = os.getenv("UBIRCH_ENV", "dev")
-UBIRCH_AUTH_TYPE = os.getenv("UBIRCH_AUTH_TYPE", "cumulocity")
+UBIRCH_AUTH_TYPE = os.getenv("UBIRCH_AUTH_TYPE", "ubirch")
 UBIRCH_AUTH = os.getenv("UBIRCH_AUTH")
 TEST_UUID = os.getenv("TEST_UUID")
 TEST_KEY_EDDSA = os.getenv("TEST_KEY_EDDSA")
@@ -286,16 +286,16 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
 
         try:
             # TODO: remove the sleep after fixing the delaying issues
-            time.sleep(3)
-            r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/verify",
+            time.sleep(2)
+            r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/upp",
                               headers={"Accept": "application/json", "Content-Type": "text/plain"},
                               timeout=5,
                               data=base64.b64encode(msg[1]))
             if r.status_code == requests.codes.ok:
-                if json.loads(r.content)["seal"] == base64.b64encode(msg[0]).decode():
+                if json.loads(r.content)["upp"] == base64.b64encode(msg[0]).decode():
                     logger.info(f"=== OK  #{n:03d} verification matches")
                 else:
-                    logger.error(f"!!! ERR #{n:03d} verification faileds")
+                    logger.error(f"!!! ERR #{n:03d} verification failed")
                     errors_vrfy += 1
             else:
                 logger.error(f"!!! ERR #{n:03d} verification failed: {r.status_code} {r.content.decode()}")
