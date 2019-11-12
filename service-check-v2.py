@@ -286,7 +286,8 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
 
         try:
             # TODO: remove the sleep after fixing the delaying issues
-            time.sleep(2)
+            if UBIRCH_ENV != "dev":
+                time.sleep(2)
             r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/upp",
                               headers={"Accept": "application/json", "Content-Type": "text/plain"},
                               timeout=5,
