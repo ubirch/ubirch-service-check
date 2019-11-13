@@ -267,7 +267,8 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
 
             if r.status_code == requests.codes.OK:
                 try:
-                    logger.info(f"=== OK  #{n:03d} {repr(proto.message_verify(r.content))}")
+                    logger.info(f"=== OK  #{n:03d} {binascii.b2a_base64(msg[1]).decode()[:-2]}")
+                    # {repr(proto.message_verify(r.content))}")
                 except Exception:
                     logger.error(f"!!! ERR #{n:03d} response verification failed: {binascii.hexlify(r.content).decode()}")
                     logger.error(f"!!! ERR ===> {repr(r.content)}")
