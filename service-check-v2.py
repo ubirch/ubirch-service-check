@@ -195,8 +195,22 @@ class Proto(ubirch.Protocol, ABC):
 
 def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
     MESSAGES = []
+    errors_gnrl = 0
+    errors_send = 0
+    errors_vrfy = 0
 
     proto.update_key(uuid, key, type)
+
+    r = api.deregister_identity(str.encode(json.dumps({
+        "publicKey": bytes.decode(base64.b64encode(proto.get_vk())),
+        "signature": bytes.decode(base64.b64encode(proto.sk.sign(proto.get_vk())))
+    })))
+    logger.info(f"=== de-registering public key: {r.content.decode()}")
+    if r.status_code == requests.codes.ok:
+        logger.info("=== OK  de-register key")
+    else:
+        logger.error(f"!!! ERR de-register key failed: '{r.content}'")
+        errors_gnrl +=1
 
     # register the key
     #msg = proto.message_signed(uuid, UBIRCH_PROTOCOL_TYPE_REG, proto.get_certificate())
@@ -231,10 +245,6 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
         else:
             msg = proto.message_chained(uuid, 0x00, digest)
         MESSAGES.append([msg, digest])
-
-    errors_gnrl = 0
-    errors_send = 0
-    errors_vrfy = 0
 
     # send out prepared messages
     for n, msg in enumerate(MESSAGES):
@@ -286,9 +296,6 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
             errors_send += 1
 
         try:
-            # TODO: remove the sleep after fixing the delaying issues
-            if UBIRCH_ENV != "dev":
-                time.sleep(2)
             r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/upp",
                               headers={"Accept": "application/json", "Content-Type": "text/plain"},
                               timeout=5,
@@ -305,17 +312,6 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
         except Exception as e:
             logger.error(f"!!! ERR #{n:03d} request timeout verifying message: {e.args}")
             errors_vrfy += 1
-
-    r = api.deregister_identity(str.encode(json.dumps({
-        "publicKey": bytes.decode(base64.b64encode(proto.get_vk())),
-        "signature": bytes.decode(base64.b64encode(proto.sk.sign(proto.get_vk())))
-    })))
-    logger.info(f"=== de-registering public key: {r.content.decode()}")
-    if r.status_code == requests.codes.ok:
-        logger.info("=== OK  de-register key")
-    else:
-        logger.error(f"!!! ERR de-register key failed: '{r.content}'")
-        errors_gnrl +=1
 
     return errors_gnrl, errors_send, errors_vrfy
 
