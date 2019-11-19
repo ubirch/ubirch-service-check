@@ -296,7 +296,8 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
             errors_send += 1
 
         try:
-            r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/upp",
+            time.sleep(3)
+            r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/upp/verify/anchor",
                               headers={"Accept": "application/json", "Content-Type": "text/plain"},
                               timeout=5,
                               data=base64.b64encode(msg[1]))
