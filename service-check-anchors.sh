@@ -12,7 +12,7 @@ while read -r line; do
     echo "only ${anchors} anchors found"
     errors=$((errors + 1))
   fi
-done
+done < hashes.txt
 if [ ${errors} -gt 0 ]; then
   echo "${errors} anchor verification errors"
   exit 1
