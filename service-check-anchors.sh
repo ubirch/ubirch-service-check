@@ -1,15 +1,14 @@
 #! /bin/bash
-echo "waiting for 60s before doing anchor verification..."
-sleep 60
+WAIT=${DELAY:-60}
+echo "waiting for ${WAIT}s before doing anchor verification..."
+sleep $WAIT
 errors=0
 while read -r line; do
   echo -n "checking \"${line}\": "
   anchors=$(curl --silent -d "$line" https://verify.${UBIRCH_ENV:-dev}.ubirch.com/api/upp/verify/record | \
     jq -r '(.anchors.upper_blockchains | length)  + (.anchors.lower_blockchains | length)')
-  if [ ${anchors} -ge 2 ]; then
-    echo "${anchors} anchors found"
-  else
-    echo "only ${anchors} anchors found"
+  echo "${anchors} anchors found"
+  if [ ${anchors} -lt 2 ]; then
     errors=$((errors + 1))
   fi
 done < hashes.txt
