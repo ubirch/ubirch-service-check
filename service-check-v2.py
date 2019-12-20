@@ -296,27 +296,28 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
             errors_send += 1
 
         try:
-            time.sleep(3)
-            r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/upp/verify/anchor",
+            r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/upp",
                               headers={"Accept": "application/json", "Content-Type": "text/plain"},
                               timeout=5,
                               data=base64.b64encode(msg[1]))
             if r.status_code == requests.codes.ok:
                 logger.debug(r.content.decode())
                 response = json.loads(r.content)
-                found = response["upp"] == base64.b64encode(msg[0]).decode()
-                anchors = len(response["anchors"])
-                if found and anchors != 0:
-                    logger.info(f"=== OK  #{n:03d} verification matches (upp={found}, anchors={anchors})")
+                if response["upp"] == base64.b64encode(msg[0]).decode():
+                    logger.info(f"=== OK  #{n:03d} upp verification matches")
                 else:
-                    logger.error(f"!!! ERR #{n:03d} verification failed (upp={found}, anchors={anchors})")
+                    logger.error(f"!!! ERR #{n:03d} upp verification failed")
                     errors_vrfy += 1
             else:
-                logger.error(f"!!! ERR #{n:03d} verification failed: {r.status_code} {r.content.decode()}")
+                logger.error(f"!!! ERR #{n:03d} upp verification failed: {r.status_code} {r.content.decode()}")
                 errors_vrfy += 1
         except Exception as e:
             logger.error(f"!!! ERR #{n:03d} request timeout verifying message: {e.args}")
             errors_vrfy += 1
+
+    with open("hashes.txt", "a") as f:
+        for n, msg in enumerate(MESSAGES):
+            f.write(base64.b64encode(msg[1]).decode()+"\n")
 
     return errors_gnrl, errors_send, errors_vrfy
 
