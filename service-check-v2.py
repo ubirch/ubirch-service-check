@@ -302,10 +302,14 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
                               timeout=5,
                               data=base64.b64encode(msg[1]))
             if r.status_code == requests.codes.ok:
-                if json.loads(r.content)["upp"] == base64.b64encode(msg[0]).decode():
-                    logger.info(f"=== OK  #{n:03d} verification matches")
+                logger.debug(r.content.decode())
+                response = json.loads(r.content)
+                found = response["upp"] == base64.b64encode(msg[0]).decode()
+                anchors = len(response["anchors"])
+                if found and anchors != 0:
+                    logger.info(f"=== OK  #{n:03d} verification matches (upp={found}, anchors={anchors})")
                 else:
-                    logger.error(f"!!! ERR #{n:03d} verification failed")
+                    logger.error(f"!!! ERR #{n:03d} verification failed (upp={found}, anchors={anchors})")
                     errors_vrfy += 1
             else:
                 logger.error(f"!!! ERR #{n:03d} verification failed: {r.status_code} {r.content.decode()}")
