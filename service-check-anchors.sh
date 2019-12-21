@@ -6,16 +6,17 @@ errors=0
 while read -r line; do
   [ "$LOGLEVEL" == "DEBUG" ] && \
     curl --silent -d "$line" https://verify.${UBIRCH_ENV:-dev}.ubirch.com/api/upp/verify/record | jq
-  echo -n "checking \"${line}\": "
   anchors=$(curl --silent -d "$line" https://verify.${UBIRCH_ENV:-dev}.ubirch.com/api/upp/verify/record | \
     jq -r '(.anchors.upper_blockchains | length)  + (.anchors.lower_blockchains | length)')
   if [ "$?" != "0" ]; then
-    echo "error checking hash"
+    echo -e "\e[41mchecking \"${line}\": ERROR\e[0m"
     errors=$((errors + 1))
   else
-    echo "${anchors} anchors found"
     if [ ${anchors} -lt 2 ]; then
+      echo -e "\e[41mchecking \"${line}\": ${anchors} anchors found\e[0m"
       errors=$((errors + 1))
+    else
+      echo -e "\e[32mchecking \"${line}\": ${anchors} anchors found\e[0m"
     fi
   fi
 done < hashes.txt
