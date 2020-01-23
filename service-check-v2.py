@@ -239,12 +239,15 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
     for n in range(1, 11):
         timestamp = datetime.utcnow()
         message = f"{n},{timestamp.isoformat()},{random.random()*1e9}"
-        digest = hashlib.sha512(message.encode()).digest()
+        if type == "ECC_ED25519":
+            digest = hashlib.sha512(message.encode()).digest()
+        else:
+            digest = hashlib.sha256(message.encode()).digest()
         if n < 6:
             msg = proto.message_signed(uuid, 0x00, digest)
         else:
             msg = proto.message_chained(uuid, 0x00, digest)
-        MESSAGES.append([msg, digest])
+        MESSAGES.append([msg, digest, message])
 
     # send out prepared messages
     for n, msg in enumerate(MESSAGES):
@@ -260,7 +263,7 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
                     'X-Ubirch-Hardware-Id': str(uuid),
                     'X-Ubirch-Credential': passwd,
                     'X-Ubirch-Auth-Type': 'ubirch',
-                    #"X-Niomon-Purge-Caches": "true",
+                    "X-Niomon-Purge-Caches": "true",
                 }
             else:
                 credentials = tuple(auth.split(":"))
@@ -277,7 +280,7 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
 
             if r.status_code == requests.codes.OK:
                 try:
-                    logger.info(f"=== OK  #{n:03d} {binascii.b2a_base64(msg[1]).decode()[:-2]}")
+                    logger.info(f"=== OK  #{n:03d} {binascii.b2a_base64(msg[1]).decode()[:-2]} [{msg[2]}]")
                     # {repr(proto.message_verify(r.content))}")
                 except Exception:
                     logger.error(f"!!! ERR #{n:03d} response verification failed: {binascii.hexlify(r.content).decode()}")
