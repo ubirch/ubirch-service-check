@@ -263,7 +263,7 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
                     'X-Ubirch-Hardware-Id': str(uuid),
                     'X-Ubirch-Credential': passwd,
                     'X-Ubirch-Auth-Type': 'ubirch',
-                    "X-Niomon-Purge-Caches": "true",
+                    #"X-Niomon-Purge-Caches": "true",
                 }
             else:
                 credentials = tuple(auth.split(":"))
