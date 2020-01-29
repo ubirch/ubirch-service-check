@@ -12,6 +12,7 @@ while read -r line; do
     echo -e "\e[41mchecking \"${line}\": ERROR\e[0m"
     errors=$((errors + 1))
   else
+    if [ "${anchors}" == "" ]; then anchors=0; fi
     if [ ${anchors} -lt 2 ]; then
       echo -e "\e[41mchecking \"${line}\": ${anchors} anchors found\e[0m"
       errors=$((errors + 1))
