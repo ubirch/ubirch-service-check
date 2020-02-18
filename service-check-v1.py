@@ -122,6 +122,10 @@ class Proto(ubirch.Protocol):
     def _sign(self, uuid: UUID, message: bytes) -> bytes:
         return self.__ks.find_signing_key(uuid).sign(message)
 
+    def __serialize(self, msg: any) -> bytearray:
+        import msgpack
+        return bytearray(msgpack.packb(msg, use_bin_type=False))
+
 
 # test UUID
 uuid = UUID(hex=os.getenv('UBIRCH_DEVICE_UUID', "00000000-0000-0000-0000-000000000000"))
