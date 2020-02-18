@@ -122,7 +122,8 @@ class Proto(ubirch.Protocol):
     def _sign(self, uuid: UUID, message: bytes) -> bytes:
         return self.__ks.find_signing_key(uuid).sign(message)
 
-    def __serialize(self, msg: any) -> bytearray:
+    # this is a bad hack to fix the problem of an unpinned msgpack dependency
+    def _Protocol__serialize(self, msg: any) -> bytearray:
         import msgpack
         return bytearray(msgpack.packb(msg, use_bin_type=False))
 
