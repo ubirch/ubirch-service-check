@@ -321,7 +321,7 @@ for n in range(4, 8):
 for n, msg in enumerate(MESSAGES_SENT.copy()):
     r = api.send(msg)
     logger.debug(binascii.hexlify(msg))
-    if r.status_code == requests.codes.accepted:
+    if r.status_code == requests.codes.accepted || r.status_code == requests.codes.ok:
         logger.info("{}.service.{}.message.{}.send: OK".format(UBIRCH_ENV, AVATAR_SERVICE, n))
     else:
         ERRORS += 1
