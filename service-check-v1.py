@@ -33,7 +33,7 @@ import ubirch
 from ubirch.ubirch_api import AVATAR_SERVICE, KEY_SERVICE
 from ubirch.ubirch_protocol import UBIRCH_PROTOCOL_TYPE_REG
 
-LOGLEVEL = os.getenv("LOGLEVEL", "DEBUG").upper()
+LOGLEVEL = os.getenv("LOGLEVEL", "INFO").upper()
 logging.basicConfig(format='%(asctime)s %(name)20.20s %(levelname)-8.8s %(message)s', level=LOGLEVEL)
 logger = logging.getLogger()
 
@@ -322,8 +322,6 @@ for n, msg in enumerate(MESSAGES_SENT.copy()):
     r = api.send(msg)
     logger.debug(binascii.hexlify(msg))
     if r.status_code == requests.codes.accepted:
-        logger.info("{}.service.{}.message.{}.send: OK".format(UBIRCH_ENV, AVATAR_SERVICE, n))
-    elif r.status_code == requests.codes.ok: 
         logger.info("{}.service.{}.message.{}.send: OK".format(UBIRCH_ENV, AVATAR_SERVICE, n))
     else:
         ERRORS += 1
