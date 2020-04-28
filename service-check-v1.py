@@ -21,13 +21,11 @@ import binascii
 import json
 import logging
 import os
-import threading
 import time
 from datetime import datetime
 from json import JSONDecodeError
 from uuid import UUID
 
-import paho.mqtt.client as mqtt
 import requests
 import ubirch
 from ubirch.ubirch_api import AVATAR_SERVICE, KEY_SERVICE
@@ -48,30 +46,13 @@ if UBIRCH_CLIENT and not UBIRCH_CLIENT.strip():
 
 UBIRCH_ENV = os.getenv("UBIRCH_ENV")
 UBIRCH_AUTH = os.getenv("UBIRCH_AUTH")
-UBIRCH_AUTH_MQTT = os.getenv("UBIRCH_AUTH_MQTT")
 
 ICINGA_URL = os.getenv("ICINGA_URL")
 ICINGA_AUTH = os.getenv("ICINGA_AUTH")
 
-(MQTT_USER, MQTT_PASS) = (None, None)
-if UBIRCH_AUTH_MQTT:
-    (MQTT_USER, MQTT_PASS) = UBIRCH_AUTH_MQTT.split(":")
-
-MQTT_PORT = 1883
-if UBIRCH_ENV == "dev":
-    MQTT_SERVER = "mq.dev.ubirch.com"
-elif UBIRCH_ENV == "demo":
-    MQTT_SERVER = "mq.demo.ubirch.com"
-elif UBIRCH_ENV == "prod":
-    MQTT_SERVER = "mq.prod.ubirch.com"
-else:
-    MQTT_SERVER = "localhost"
-
 logger.debug("UBIRCH_CLIENT = '{}'".format(UBIRCH_CLIENT))
 logger.debug("UBIRCH_ENV    = '{}'".format(UBIRCH_ENV))
 logger.debug("UBIRCH_AUTH   = '{}'".format(UBIRCH_AUTH))
-logger.debug("MQTT_SERVER   = '{}:{}'".format(MQTT_SERVER, MQTT_PORT))
-logger.debug("MQTT_AUTH     = '{}:{}'".format(MQTT_USER, MQTT_PASS))
 logger.debug("NEOJ4_URL     = '{}'".format(NEO4J_URL))
 logger.debug("NEOJ4_AUTH    = '{}'".format(NEO4J_AUTH))
 
@@ -257,57 +238,6 @@ else:
     nagios(UBIRCH_CLIENT, UBIRCH_ENV, AVATAR_SERVICE + "-device-create", NAGIOS_ERROR,
            "{} {}".format(r.status_code, bytes.decode(r.content)))
 
-connected_event = threading.Event()
-finished_event = threading.Event()
-
-
-def mqtt_connected(client, userdata, flags, rc):
-    if UBIRCH_CLIENT:
-        client.subscribe("{}-{}/ubirch/devices/{}/processed".format(UBIRCH_CLIENT, UBIRCH_ENV, str(uuid)), qos=1)
-    else:
-        client.subscribe("ubirch-{}/ubirch/devices/{}/processed".format(UBIRCH_ENV, str(uuid)), qos=1)
-
-
-def mqtt_subscribed(client, userdata, mid, granted_qos):
-    logger.debug("SUBSCRIBED")
-    connected_event.set()
-
-
-def mqtt_received(client, userdata, msg):
-    global ERRORS
-    payload = json.loads(bytes.decode(msg.payload))
-    message = bytes.fromhex(payload['deviceDataRaw']['mpraw'])
-    logger.debug("{}: {}".format(str(msg.topic), str(msg.payload)))
-    if message in MESSAGES_SENT:
-        MESSAGES_SENT.remove(message)
-        logger.info("{}.service.{}.message.mqtt.{}.received: OK"
-                    .format(UBIRCH_ENV, AVATAR_SERVICE, payload['deviceMessage']['v']))
-    else:
-        ERRORS += 1
-        logger.error(msg.topic + " " + str(msg.payload))
-    if len(MESSAGES_SENT) == 0:
-        client.unsubscribe("ubirch-{}/ubirch/devices/{}/processed".format(UBIRCH_ENV, str(uuid)))
-        finished_event.set()
-
-
-client = mqtt.Client(client_id=uuid.hex)
-if MQTT_USER and MQTT_PASS:
-    client.username_pw_set(MQTT_USER, MQTT_PASS)
-if logger.level == logging.DEBUG:
-    client.enable_logger(logger)
-
-client.on_connect = mqtt_connected
-client.on_subscribe = mqtt_subscribed
-client.on_message = mqtt_received
-logger.debug("mqtt: connect({}, {})".format(MQTT_SERVER, MQTT_PORT))
-client.connect(MQTT_SERVER, MQTT_PORT, 30)
-client.loop_start()
-
-# wait until mqtt is connected and subscribed
-if not connected_event.wait(timeout=30):
-    nagios(UBIRCH_CLIENT, UBIRCH_ENV, "mqtt", NAGIOS_OK, "could not subscribe")
-    exit(-1)
-
 # send signed messages
 for n in range(1, 4):
     msg = proto.message_signed(uuid, 0x53, {'ts': int(datetime.utcnow().timestamp()), 'v': n})
@@ -328,15 +258,6 @@ for n, msg in enumerate(MESSAGES_SENT.copy()):
         ERROR_RESULTS.append("message(#{}, {}): {}".format(n, r.status_code, bytes.decode(r.content)))
         logger.error("{}.service.{}.message.{}.send: FAILED: {} {}"
                      .format(UBIRCH_ENV, AVATAR_SERVICE, n, r.status_code, bytes.decode(r.content)))
-
-finished_event.wait(timeout=30)
-if len(MESSAGES_SENT) == 0:
-    logger.info("{}.service.{}.mqtt: OK".format(UBIRCH_ENV, AVATAR_SERVICE))
-else:
-    ERRORS += 1
-    logger.error("{}.service.{}.mqtt: FAILED: {} messages missing"
-                 .format(UBIRCH_ENV, AVATAR_SERVICE, len(MESSAGES_SENT)))
-client.disconnect()
 
 # delete the device
 if api.device_delete(uuid):
