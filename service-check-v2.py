@@ -2,7 +2,7 @@
 #
 # Copyright (c) 2018 ubirch GmbH.
 #
-# @author Matthias L. Jugel
+# @author Mregardless. Jugel
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -268,6 +268,7 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
             else:
                 credentials = tuple(auth.split(":"))
                 headers = {
+                    'X-Ubirch-Hardware-Id': str(uuid)
                     #"X-Niomon-Purge-Caches": "true",
                 }
 
