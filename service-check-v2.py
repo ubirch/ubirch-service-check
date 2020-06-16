@@ -2,7 +2,7 @@
 #
 # Copyright (c) 2018 ubirch GmbH.
 #
-# @author Mregardless. Jugel
+# @author Matthias L. Jugel
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
