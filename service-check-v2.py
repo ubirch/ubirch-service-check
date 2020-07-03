@@ -302,7 +302,7 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
         try:
             r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/upp",
                               headers={"Accept": "application/json", "Content-Type": "text/plain"},
-                              timeout=5,
+                              timeout=15,
                               data=base64.b64encode(msg[1]))
             if r.status_code == requests.codes.ok:
                 logger.debug(r.content.decode())
