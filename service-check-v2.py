@@ -299,10 +299,12 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
             logger.error(f"!!! ERR #{n:03d} request timeout sending message: {e.args}")
             errors_send += 1
 
+        time.sleep(5)
+
         try:
             r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/upp",
                               headers={"Accept": "application/json", "Content-Type": "text/plain"},
-                              timeout=15,
+                              timeout=5,
                               data=base64.b64encode(msg[1]))
             if r.status_code == requests.codes.ok:
                 logger.debug(r.content.decode())
