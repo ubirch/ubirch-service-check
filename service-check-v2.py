@@ -299,7 +299,7 @@ def run_tests(api, proto, uuid, auth, key, type) -> (int, int, int):
             logger.error(f"!!! ERR #{n:03d} request timeout sending message: {e.args}")
             errors_send += 1
 
-        time.sleep(5)
+        # time.sleep(5)
 
         try:
             r = requests.post(f"https://verify.{UBIRCH_ENV}.ubirch.com/api/upp",
