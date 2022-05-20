@@ -81,7 +81,7 @@ def nagios(client, env, service, code, message="OK"):
 def create_trackle_messages() -> list:
     msgs: list = []
 
-    create_trackle_messages.wakeup_count += 1
+    create_trackle_messages.wakeup_count += 5
     min_val = 3500
     max_val = 4200
     interval_s = 60
