@@ -21,10 +21,12 @@ import binascii
 import json
 import logging
 import os
+import random
 import time
-from datetime import datetime
 from json import JSONDecodeError
 from uuid import UUID
+
+from ed25519 import SigningKey
 
 import requests
 import ubirch
@@ -37,9 +39,6 @@ logger = logging.getLogger()
 
 ERRORS = 0
 
-NEO4J_URL = os.getenv("NEO4J_URL")
-NEO4J_AUTH = os.getenv("NEO4J_AUTH")
-
 UBIRCH_CLIENT = os.getenv("UBIRCH_CLIENT")
 if UBIRCH_CLIENT and not UBIRCH_CLIENT.strip():
     UBIRCH_CLIENT = None
@@ -47,17 +46,17 @@ if UBIRCH_CLIENT and not UBIRCH_CLIENT.strip():
 UBIRCH_ENV = os.getenv("UBIRCH_ENV")
 UBIRCH_AUTH = os.getenv("UBIRCH_AUTH")
 
-ICINGA_URL = os.getenv("ICINGA_URL")
-ICINGA_AUTH = os.getenv("ICINGA_AUTH")
+# test UUID
+uuid = UUID(hex=os.getenv('UBIRCH_DEVICE_UUID', "00000000-0000-0000-0000-000000000000"))
 
-logger.debug("UBIRCH_CLIENT = '{}'".format(UBIRCH_CLIENT))
-logger.debug("UBIRCH_ENV    = '{}'".format(UBIRCH_ENV))
-logger.debug("UBIRCH_AUTH   = '{}'".format(UBIRCH_AUTH))
-logger.debug("NEOJ4_URL     = '{}'".format(NEO4J_URL))
-logger.debug("NEOJ4_AUTH    = '{}'".format(NEO4J_AUTH))
+sk = SigningKey(binascii.unhexlify(os.getenv('UBIRCH_PRIV_KEY')))
+vk = sk.get_verifying_key()
 
-logger.debug("ICINGA_URL    = '{}'".format(ICINGA_URL))
-logger.debug("ICINGA_AUTH   = '{}'".format(ICINGA_AUTH))
+logger.debug("UBIRCH_CLIENT        = '{}'".format(UBIRCH_CLIENT))
+logger.debug("UBIRCH_ENV           = '{}'".format(UBIRCH_ENV))
+logger.debug("UBIRCH_AUTH          = '{}'".format(UBIRCH_AUTH))
+logger.debug("UBIRCH_DEVICE_UUID   = '{}'".format(uuid))
+
 NAGIOS_OK = 0
 NAGIOS_WARNING = 1
 NAGIOS_ERROR = 2
@@ -71,13 +70,6 @@ def nagios(client, env, service, code, message="OK"):
     if not env: env = "local"
     env = client + "." + env
 
-    data = {
-        "exit_status": code,
-        "plugin_output": message,
-        "check_source": env,
-        "ttl": 3600.0
-    }
-
     if code == NAGIOS_OK:
         logger.info("{}.ubirch.com {} {}".format(env, service, message))
     elif code == NAGIOS_WARNING:
@@ -85,14 +77,40 @@ def nagios(client, env, service, code, message="OK"):
     else:
         logger.error("{}.ubirch.com {} {}".format(env, service, message))
 
-    if ICINGA_URL and ICINGA_AUTH:
-        r = requests.post(ICINGA_URL + "?" + "service={}.ubirch.com!{}".format(env, service),
-                          json=data, headers={"Accept": "application/json"}, auth=tuple(ICINGA_AUTH.split(":")))
-        if r.status_code != 200:
-            logger.error("ERROR: {}: {}".format(r.status_code, bytes.decode(r.content)))
-            ERRORS += 1
-        else:
-            logger.debug("{}: {}".format(r.status_code, bytes.decode(r.content)))
+
+def create_trackle_messages() -> list:
+    msgs: list = []
+
+    create_trackle_messages.wakeup_count += 5
+    min_val = 3500
+    max_val = 4200
+    interval_s = 60
+    now = int(time.time())
+
+    values = {}
+
+    for i in range(0, 5):
+        values["%.10s" % int(now + i * interval_s)] = random.randint(min_val, max_val)
+
+    payload = [
+        "v1.0.2-PROD-20180326103205 (v5.6.6)",
+        create_trackle_messages.wakeup_count,
+        3,  # status: ready
+        values,
+        {
+            'min': min_val,
+            'max': max_val,
+            'i': interval_s * 1000,
+            'il': 1800000,
+        }
+    ]
+
+    msgs.append(proto.message_chained(uuid, 0x54, payload))
+
+    return msgs
+
+
+create_trackle_messages.wakeup_count = 0
 
 
 class Proto(ubirch.Protocol):
@@ -109,30 +127,11 @@ class Proto(ubirch.Protocol):
         return bytearray(msgpack.packb(msg, use_bin_type=False))
 
 
-# test UUID
-uuid = UUID(hex=os.getenv('UBIRCH_DEVICE_UUID', "00000000-0000-0000-0000-000000000000"))
-
-# remove any existing public key (if previous checks failed)
-if NEO4J_URL and NEO4J_AUTH:
-    r = requests.post(NEO4J_URL, json={"statements": [{
-        "statement": "MATCH (n:PublicKey) WHERE n.infoHwDeviceId='00000000-0000-0000-0000-000000000000' DELETE n;",
-    }]}, auth=tuple(NEO4J_AUTH.split(":")))
-    try:
-        errors = r.json()["errors"]
-        if len(errors):
-            logger.error("Neo4J: errors while removing test UUID: {}: {}".format(r.status_code, errors))
-        else:
-            logger.info("Neo4J: no errors removing test UUIDs: {}: {}".format(r.status_code, r.json()))
-    except Exception as e:
-        logger.error(bytes.decode(r.content), e)
-
 # temporary key store with fixed test-key
 keystore = ubirch.KeyStore("service-check.jks", 'service-check')
-try:
-    keystore.find_signing_key(uuid)
-    keystore.create_ed25519_keypair(uuid)
-except:
-    pass
+
+if not keystore.exists_signing_key(uuid):
+    keystore.insert_ed25519_keypair(uuid, vk, sk)
 
 # configure client specific services if we have one instead of core ubirch services
 if UBIRCH_CLIENT and UBIRCH_CLIENT.strip():
@@ -175,12 +174,6 @@ for service in services:
         ERRORS += 1
         nagios(UBIRCH_CLIENT, UBIRCH_ENV, service + "-deepCheck", NAGIOS_ERROR, str(e))
 
-if not keystore.exists_signing_key(uuid):
-    keystore.create_ed25519_keypair(uuid)
-
-sk = keystore.find_signing_key(uuid)
-vk = keystore.find_verifying_key(uuid)
-
 # check, register and deregister key
 try:
     if api.is_identity_registered(uuid):
@@ -209,43 +202,8 @@ else:
     nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-register", NAGIOS_ERROR,
            "{} {}".format(r.status_code, bytes.decode(r.content)))
 
-MESSAGES_SENT: list = []
+MESSAGES_SENT = create_trackle_messages()
 ERROR_RESULTS = []
-
-# check if the device exists and delete if that is the case
-if api.device_exists(uuid):
-    api.device_delete(uuid)
-    time.sleep(5)
-
-# create a new device on the backend
-r = api.device_create({
-    "deviceId": str(uuid),
-    "deviceTypeKey": "test-sensor",
-    "deviceName": str(uuid),
-    "hwDeviceId": str(uuid),
-    "tags": ["test", "python-client"],
-    "deviceProperties": {
-        "storesData": False,
-        "blockChain": False
-    },
-    "created": "{}Z".format(datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3])
-})
-if r.status_code == requests.codes.ok:
-    # logger.info("{}.service.{}.device_create: OK".format(UBIRCH_ENV, AVATAR_SERVICE))
-    nagios(UBIRCH_CLIENT, UBIRCH_ENV, AVATAR_SERVICE + "-device-create", NAGIOS_OK)
-    time.sleep(2)
-else:
-    nagios(UBIRCH_CLIENT, UBIRCH_ENV, AVATAR_SERVICE + "-device-create", NAGIOS_ERROR,
-           "{} {}".format(r.status_code, bytes.decode(r.content)))
-
-# send signed messages
-for n in range(1, 4):
-    msg = proto.message_signed(uuid, 0x53, {'ts': int(datetime.utcnow().timestamp()), 'v': n})
-    MESSAGES_SENT.append(msg)
-# send chained messages
-for n in range(4, 8):
-    msg = proto.message_chained(uuid, 0x53, {'ts': int(datetime.utcnow().timestamp()), 'v': n})
-    MESSAGES_SENT.append(msg)
 
 # send out prepared messages
 for n, msg in enumerate(MESSAGES_SENT.copy()):
@@ -259,30 +217,20 @@ for n, msg in enumerate(MESSAGES_SENT.copy()):
         logger.error("{}.service.{}.message.{}.send: FAILED: {} {}"
                      .format(UBIRCH_ENV, AVATAR_SERVICE, n, r.status_code, bytes.decode(r.content)))
 
-# delete the device
-if api.device_delete(uuid):
-    # logger.info("{}.service.{}.device_delete: OK".format(UBIRCH_ENV, AVATAR_SERVICE))
-    nagios(UBIRCH_CLIENT, UBIRCH_ENV, AVATAR_SERVICE + "-device-delete", NAGIOS_OK)
+# delete key
+r = api.deregister_identity(str.encode(json.dumps({
+    "publicKey": bytes.decode(base64.b64encode(vk.to_bytes())),
+    "signature": bytes.decode(base64.b64encode(sk.sign(vk.to_bytes())))
+})))
+if r.status_code == requests.codes.ok:
+    # logger.info("{}.service.{}.deregister_identity: OK".format(UBIRCH_ENV, KEY_SERVICE))
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_OK)
 else:
     ERRORS += 1
-    # logger.error("{}.service.{}.device_delete: FAILED".format(UBIRCH_ENV, AVATAR_SERVICE))
-    nagios(UBIRCH_CLIENT, UBIRCH_ENV, AVATAR_SERVICE + "-device-delete", NAGIOS_ERROR, "failed")
-
-# delete key (IGNORED UNTIL KEY SERVER IS FIXED, IS DELETED VIA NEO4J ANYWAY)
-if UBIRCH_ENV != 'fixed':
-    r = api.deregister_identity(str.encode(json.dumps({
-        "publicKey": bytes.decode(base64.b64encode(vk.to_bytes())),
-        "signature": bytes.decode(base64.b64encode(sk.sign(vk.to_bytes())))
-    })))
-    if r.status_code == requests.codes.ok:
-        # logger.info("{}.service.{}.deregister_identity: OK".format(UBIRCH_ENV, KEY_SERVICE))
-        nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_OK)
-    else:
-        ERRORS += 1
-        # logger.error("{}.service.{}.deregister_identity: FAILED: {}"
-        #              .format(UBIRCH_ENV, KEY_SERVICE, bytes.decode(r.content)))
-        nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_ERROR,
-               "{} {}".format(r.status_code, bytes.decode(r.content)))
+    # logger.error("{}.service.{}.deregister_identity: FAILED: {}"
+    #              .format(UBIRCH_ENV, KEY_SERVICE, bytes.decode(r.content)))
+    nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-deregister", NAGIOS_ERROR,
+           "{} {}".format(r.status_code, bytes.decode(r.content)))
 
 if ERRORS > 0:
     nagios(UBIRCH_CLIENT, UBIRCH_ENV, "ubirch", NAGIOS_ERROR,
