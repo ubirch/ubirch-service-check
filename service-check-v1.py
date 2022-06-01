@@ -105,7 +105,9 @@ def create_trackle_messages() -> list:
         }
     ]
 
-    msgs.append(proto.message_chained(uuid, 0x54, payload))
+    chained = proto.message_chained(uuid, 0x54, payload)
+    msgs.append(chained)
+    logger.info("chained UPP: {}".format(binascii.hexlify(chained)))
 
     return msgs
 
