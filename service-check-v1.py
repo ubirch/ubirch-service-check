@@ -96,7 +96,7 @@ def create_trackle_messages() -> list:
     values = {}
 
     for i in range(0, 5):
-        values["%.10s" % int(now + i * interval_s)] = random.randint(min_val, max_val)
+        values[int(now + i * interval_s)] = random.randint(min_val, max_val)
 
     payload = [
         "v1.0.2-PROD-20180326103205 (v5.6.6)",
