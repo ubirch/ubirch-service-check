@@ -218,13 +218,14 @@ ERROR_RESULTS = []
 
 # send out prepared messages
 for n, msg in enumerate(MESSAGES_TO_SEND):
-    logger.info("sending UPP: {}".format(binascii.hexlify(msg)))
+    logger.debug("message(#{}): {}".format(n, binascii.hexlify(msg)))
     r = api.send(msg)
     if r.status_code == requests.codes.accepted:
         logger.info("{}.service.{}.message.{}.send: OK".format(UBIRCH_ENV, AVATAR_SERVICE, n))
         MESSAGES_TO_SEND.remove(msg)
 
         # verify the backend response
+        logger.debug("response(#{}): {}".format(n, binascii.hexlify(r.content)))
         try:
             verify_avatar_response(r.content)
             logger.info("{}.service.{}.response.{}.verify: OK".format(UBIRCH_ENV, AVATAR_SERVICE, n))
