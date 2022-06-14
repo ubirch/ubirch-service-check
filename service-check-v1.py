@@ -18,6 +18,7 @@
 #
 import base64
 import binascii
+import hashlib
 import json
 import logging
 import os
@@ -26,7 +27,7 @@ import time
 from json import JSONDecodeError
 from uuid import UUID
 
-from ed25519 import SigningKey
+from ed25519 import SigningKey, VerifyingKey, BadSignatureError
 
 import requests
 import ubirch
@@ -49,13 +50,18 @@ UBIRCH_AUTH = os.getenv("UBIRCH_AUTH")
 # test UUID
 uuid = UUID(hex=os.getenv('UBIRCH_DEVICE_UUID', "00000000-0000-0000-0000-000000000000"))
 
+# private key for signing test messages
 sk = SigningKey(binascii.unhexlify(os.getenv('UBIRCH_PRIV_KEY')))
 vk = sk.get_verifying_key()
 
-logger.debug("UBIRCH_CLIENT        = '{}'".format(UBIRCH_CLIENT))
-logger.debug("UBIRCH_ENV           = '{}'".format(UBIRCH_ENV))
-logger.debug("UBIRCH_AUTH          = '{}'".format(UBIRCH_AUTH))
-logger.debug("UBIRCH_DEVICE_UUID   = '{}'".format(uuid))
+# public key of the ubirch avatar service for verification of responses
+avatar_vk = VerifyingKey(binascii.unhexlify(os.getenv('UBIRCH_AVATAR_PUB_KEY')))
+
+logger.debug("UBIRCH_CLIENT           = '{}'".format(UBIRCH_CLIENT))
+logger.debug("UBIRCH_ENV              = '{}'".format(UBIRCH_ENV))
+logger.debug("UBIRCH_AUTH             = '{}'".format(UBIRCH_AUTH))
+logger.debug("UBIRCH_DEVICE_UUID      = '{}'".format(uuid))
+logger.debug("UBIRCH_AVATAR_PUB_KEY   = '{}'".format(avatar_vk.to_ascii(encoding="hex")))
 
 NAGIOS_OK = 0
 NAGIOS_WARNING = 1
@@ -107,12 +113,15 @@ def create_trackle_messages() -> list:
 
     chained = proto.message_chained(uuid, 0x54, payload)
     msgs.append(chained)
-    logger.info("chained UPP: {}".format(binascii.hexlify(chained)))
 
     return msgs
 
 
 create_trackle_messages.wakeup_count = 0
+
+
+def verify_avatar_response(message: bytes):
+    avatar_vk.verify(message[-64:], hashlib.sha512(message[:-67]).digest())
 
 
 class Proto(ubirch.Protocol):
@@ -204,15 +213,28 @@ else:
     nagios(UBIRCH_CLIENT, UBIRCH_ENV, KEY_SERVICE + "-register", NAGIOS_ERROR,
            "{} {}".format(r.status_code, bytes.decode(r.content)))
 
-MESSAGES_SENT = create_trackle_messages()
+MESSAGES_TO_SEND = create_trackle_messages()
 ERROR_RESULTS = []
 
 # send out prepared messages
-for n, msg in enumerate(MESSAGES_SENT.copy()):
+for n, msg in enumerate(MESSAGES_TO_SEND):
+    logger.info("sending UPP: {}".format(binascii.hexlify(msg)))
     r = api.send(msg)
-    logger.debug(binascii.hexlify(msg))
     if r.status_code == requests.codes.accepted:
         logger.info("{}.service.{}.message.{}.send: OK".format(UBIRCH_ENV, AVATAR_SERVICE, n))
+        MESSAGES_TO_SEND.remove(msg)
+
+        # verify the backend response
+        try:
+            verify_avatar_response(r.content)
+            logger.info("{}.service.{}.response.{}.verify: OK".format(UBIRCH_ENV, AVATAR_SERVICE, n))
+        except BadSignatureError as e:
+            ERRORS += 1
+            ERROR_RESULTS.append("{} service response(#{}): {}".format(AVATAR_SERVICE, n, binascii.hexlify(r.content)))
+            logger.error("{}.service.{}.response.{}.verify: FAILED: {} (public key: {})"
+                         .format(UBIRCH_ENV, AVATAR_SERVICE, n, binascii.hexlify(r.content),
+                                 bytes.decode(avatar_vk.to_ascii(encoding="hex"))))
+
     else:
         ERRORS += 1
         ERROR_RESULTS.append("message(#{}, {}): {}".format(n, r.status_code, bytes.decode(r.content)))
@@ -236,7 +258,7 @@ else:
 
 if ERRORS > 0:
     nagios(UBIRCH_CLIENT, UBIRCH_ENV, "ubirch", NAGIOS_ERROR,
-           "{} messages missing, total {} errors\n{}".format(len(MESSAGES_SENT), ERRORS, "\n".join(ERROR_RESULTS)))
+           "{} messages not sent, total {} errors\n{}".format(len(MESSAGES_TO_SEND), ERRORS, "\n".join(ERROR_RESULTS)))
     logger.error("{} ERRORS".format(ERRORS))
     exit(-1)
 else:
