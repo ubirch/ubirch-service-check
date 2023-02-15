@@ -1,0 +1,6 @@
+ubirch-protocol
+pytest
+
+msgpack>=0.6.0
+ecdsa>=0.7
+ed25519>=1.4
