@@ -8,3 +8,5 @@
 *.jks
 *.egg-info
 *.auth
+venv/
+*.swp
