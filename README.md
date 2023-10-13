@@ -1,3 +1,6 @@
+## !!! this project is archived here and continued at gitlab !!!
+
+
 Check scripts to control if all our services are up and running nicely.
 **service-check-v1.py** is responsible for Avatar- and Trackle-Service
 
