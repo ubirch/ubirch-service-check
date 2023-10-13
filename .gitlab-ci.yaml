@@ -1,0 +1,55 @@
+stages:
+  - test
+  - build
+
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - project: "ubirch/ci-templates"
+    ref: "main"
+    file: "buildkit.gitlab-ci.yaml"
+
+sast:
+  stage: test
+
+docker-build:
+  extends: .buildkit
+  variables:
+    DOCKERHUB_REGISTRY_IMAGE: "docker.io/ubirch/$CI_PROJECT_NAME"
+    IMAGE: "name=docker.io/ubirch/$CI_PROJECT_NAME:$CI_COMMIT_SHORT_SHA"
+    PUSH_IMAGE: "false" # Only push the image on default branch or tag
+  rules:
+    # never build MR's
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    # Always tag with SHA, on default branch also tag with latest
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      variables:
+        IMAGE: "name=$DOCKERHUB_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA,$DOCKERHUB_REGISTRY_IMAGE:latest"
+        PUSH_IMAGE: "true"
+      when: on_success
+    # Tag with git tag when set
+    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TAG != null"
+      variables:
+        IMAGE: "name=$DOCKERHUB_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA,$DOCKERHUB_REGISTRY_IMAGE:$CI_COMMIT_TAG"
+        PUSH_IMAGE: "true"
+    ## temporary build also dev-branch
+    #- if: '$CI_COMMIT_BRANCH == "dev" '
+    #  variables:
+    #    IMAGE: "name=${DOCKERHUB_REGISTRY_IMAGE}-${CI_COMMIT_BRANCH}:$CI_COMMIT_SHORT_SHA,${DOCKERHUB_REGISTRY_IMAGE}-${CI_COMMIT_BRANCH}:latest"
+    #    PUSH_IMAGE: "true"
+    - when: never
+  script:
+    - >
+      echo "Docker context: $DOCKER_CONTEXT"
+      && echo "Dockerfile directory: $DOCKERFILE_DIR"
+      && echo "Cache image: $BUILD_CACHE"
+      && echo "Images:" $(echo $IMAGE | sed "s/name=//")
+    - '[[ -n "$DOCKERFILE_NAME" ]] && BUILDKIT_ARGS="$BUILDKIT_ARGS --frontend-opt filename=$DOCKERFILE_NAME"'
+    - echo $BUILDKIT_ARGS
+    - >
+      buildctl-daemonless.sh build --progress=plain
+      --frontend=dockerfile.v0 --local context=$DOCKER_CONTEXT --local dockerfile=$DOCKERFILE_DIR
+      --export-cache type=registry,mode=max,ref=$BUILD_CACHE
+      --import-cache type=registry,ref=$BUILD_CACHE
+      --output type=image,\"$IMAGE\",push=$PUSH_IMAGE
+      $BUILDKIT_ARGS
